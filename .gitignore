@@ -1,0 +1,8 @@
+venv/
+myenv/
+
+__pycache__/
+
+data/train/*
+
+test.py
