@@ -1,6 +1,5 @@
 import numpy as np
 import json
-from tqdm import tqdm
 
 def gen_masked_img(rgb, mask):
     """
@@ -93,7 +92,7 @@ def load_data(root, num_scene=6, img_per_scene=1000):
         with open(pbr_root + scene_path + "scene_gt_info.json") as f:
             scene_gt_info = json.load(f)
         
-        for i in tqdm(range(img_per_scene), desc=f"Scene 00000{scene_id}"):
+        for i in range(img_per_scene):
             rgb_path = scene_path + "rgb/" + str(i).zfill(6) + ".jpg"
             num_instance = len(scene_gt[str(i)])
             for j in range(num_instance):
