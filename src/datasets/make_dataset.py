@@ -31,6 +31,9 @@ class IOPENDataset(Dataset):
         return {'img': img, 'heatmap': heatmap}
 
 def make_dataset():
+    """
+    Create and return the IOPEN dataset.
+    """
     data_root = cfg['dataset_path']
     dataset = IOPENDataset(data_root)
     return dataset

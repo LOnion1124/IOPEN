@@ -9,8 +9,8 @@ def gen_masked_img(rgb, mask):
     :param mask: Binary mask array of shape (height, width)
     :return: Masked image with same shape as rgb
     """
-    mask = (mask > 0).astype(np.bool)
-    masked_img = (rgb * mask[:, :, None]).astype(np.float32)
+    masked_img = rgb.copy()
+    masked_img[mask == 0] = [0, 255, 0]
     return masked_img
 
 def gen_heatmap(camera, model, cam_R_m2c, cam_t_m2c):
