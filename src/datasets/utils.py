@@ -1,5 +1,28 @@
 import numpy as np
 import json
+import cv2
+
+def preprocess_image_for_dinov2(image, patch_size=14):
+    """
+    Resize image dimensions to be multiples of patch_size for DINOv2.
+    
+    :param image: Input image array of shape (H, W, 3) or (H, W)
+    :param patch_size: DINOv2 patch size (default: 14 for ViT-S14)
+    :return: Resized image with dimensions as multiples of patch_size
+    """
+    H, W = image.shape[:2]
+    
+    # Calculate nearest multiple of patch_size
+    new_H = (H // patch_size) * patch_size
+    new_W = (W // patch_size) * patch_size
+    
+    # Resize using cv2
+    if new_H > 0 and new_W > 0:
+        resized = cv2.resize(image, (new_W, new_H), interpolation=cv2.INTER_LINEAR)
+    else:
+        resized = image
+    
+    return resized
 
 def gen_masked_img(rgb, mask):
     """

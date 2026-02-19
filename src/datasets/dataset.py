@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import imageio.v3 as iio
 import numpy as np
 from .utils import *
@@ -26,9 +26,14 @@ class IOPENDataset(Dataset):
         cam_t_m2c = np.array(self.data_dict['samples']['cam_t_m2c'][index], dtype=np.float32).reshape(3, 1)
 
         img = gen_masked_img(rgb, mask)
+        img_dinov2 = preprocess_image_for_dinov2(img, patch_size=14)
         heatmap = gen_heatmap(camera, model, cam_R_m2c, cam_t_m2c)
+        
+        img = torch.from_numpy(img).float().cuda()
+        img_dinov2 = torch.from_numpy(img_dinov2).permute(2, 0, 1).float().cuda()
+        heatmap = torch.from_numpy(heatmap).float().cuda()
 
-        return {'img': img, 'heatmap': heatmap}
+        return {'img': img, 'img_dinov2': img_dinov2, 'heatmap': heatmap}
 
 def make_dataset():
     """
@@ -37,3 +42,12 @@ def make_dataset():
     data_root = cfg['dataset_path']
     dataset = IOPENDataset(data_root)
     return dataset
+
+def make_dataloader():
+    """
+    Create and return the IOPEN dataloader.
+    """
+    dataset = make_dataset()
+    B = cfg['batch_size']
+    dataloader = DataLoader(dataset, batch_size=B, shuffle=True)
+    return dataloader
