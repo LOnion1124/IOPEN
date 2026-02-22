@@ -1,1 +1,8 @@
+height: 476
+width: 630
+
+encoder_path: "models/DINOv2/dinov2_vits14_reg4_pretrain.pth"
+patch: 14
+
 dataset_path: "data/train/DJIAction4/"
+batch_size: 32
