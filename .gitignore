@@ -3,6 +3,5 @@ myenv/
 
 __pycache__/
 
-data/train/*
-
-test.py
+data/*
+models/*
