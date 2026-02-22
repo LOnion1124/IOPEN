@@ -36,6 +36,31 @@ def gen_masked_img(rgb, mask):
     masked_img[mask == 0] = [0, 255, 0]
     return masked_img
 
+def adjust_camera_params(camera, original_h, original_w, new_h, new_w):
+    """
+    Adjust camera intrinsic parameters after image resizing.
+    
+    :param camera: Original camera intrinsics dict with keys 'cx', 'cy', 'fx', 'fy', 'height', 'width'
+    :param original_h: Original image height
+    :param original_w: Original image width
+    :param new_h: New image height after resize
+    :param new_w: New image width after resize
+    :return: Adjusted camera parameters dict
+    """
+    camera_adjusted = camera.copy()
+    
+    scale_w = new_w / original_w
+    scale_h = new_h / original_h
+    
+    camera_adjusted['width'] = new_w
+    camera_adjusted['height'] = new_h
+    camera_adjusted['cx'] = camera['cx'] * scale_w
+    camera_adjusted['cy'] = camera['cy'] * scale_h
+    camera_adjusted['fx'] = camera['fx'] * scale_w
+    camera_adjusted['fy'] = camera['fy'] * scale_h
+    
+    return camera_adjusted
+
 def gen_heatmap(camera, model, cam_R_m2c, cam_t_m2c):
     """
     Generate a heatmap for 3D bounding box keypoints projected onto image.

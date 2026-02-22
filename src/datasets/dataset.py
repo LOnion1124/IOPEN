@@ -25,15 +25,24 @@ class IOPENDataset(Dataset):
         cam_R_m2c = np.array(self.data_dict['samples']['cam_R_m2c'][index], dtype=np.float32).reshape(3, 3)
         cam_t_m2c = np.array(self.data_dict['samples']['cam_t_m2c'][index], dtype=np.float32).reshape(3, 1)
 
-        img = gen_masked_img(rgb, mask)
-        img_dinov2 = preprocess_image_for_dinov2(img, patch_size=14)
-        heatmap = gen_heatmap(camera, model, cam_R_m2c, cam_t_m2c)
+        # Generate masked image
+        img_original = gen_masked_img(rgb, mask)
         
-        img = torch.from_numpy(img).float().cuda()
+        # Preprocess image for DINOv2 (resize to patch_size multiples)
+        original_h, original_w = img_original.shape[:2]
+        img_dinov2 = preprocess_image_for_dinov2(img_original, patch_size=14)
+        new_h, new_w = img_dinov2.shape[:2]
+        
+        # Adjust camera parameters to match resized image
+        camera_adjusted = adjust_camera_params(camera, original_h, original_w, new_h, new_w)
+        
+        # Generate heatmap with adjusted camera parameters
+        heatmap = gen_heatmap(camera_adjusted, model, cam_R_m2c, cam_t_m2c)
+
         img_dinov2 = torch.from_numpy(img_dinov2).permute(2, 0, 1).float().cuda()
         heatmap = torch.from_numpy(heatmap).float().cuda()
 
-        return {'img': img, 'img_dinov2': img_dinov2, 'heatmap': heatmap}
+        return {'img': img_dinov2, 'heatmap': heatmap}
 
 def make_dataset():
     """
