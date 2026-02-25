@@ -5,4 +5,6 @@ encoder_path: "models/DINOv2/dinov2_vits14_reg4_pretrain.pth"
 patch: 14
 
 dataset_path: "data/train/DJIAction4/"
-batch_size: 32
+batch_size: 4
+
+loss_lambda: 2.0
