@@ -8,3 +8,12 @@ dataset_path: "data/train/DJIAction4/"
 batch_size: 4
 
 loss_lambda: 2.0
+
+train_result_path: "result/train/"
+
+eval:
+  model_path: "models/IOPEN/latest.pth"
+  original_img_dir: "data/eval/frame/"
+  masked_img_dirs: ["data/eval/masked_l/", "data/eval/masked_r/"]
+  output_dir: "data/eval/result/"
+  frame_cnt: 300
