@@ -25,6 +25,27 @@ class IOPEN(nn.Module):
         self.fc = nn.Linear(384, 8 * self.p * self.p)
     
     def forward(self, x):
+        """
+        Forward pass of the IOPEN model.
+        Args:
+            x (torch.Tensor): Input image tensor of shape (B, 3, H, W) where:
+                - B: Batch size
+                - 3: RGB channels
+                - H: Image height
+                - W: Image width
+        Returns:
+            torch.Tensor: Output tensor of shape (B, 8, H, W) containing:
+                - B: Batch size
+                - 8: Number of output channels
+                - H: Height (same as input)
+                - W: Width (same as input)
+        Process:
+            1. ViT Encoding: Extracts patch tokens from input image using Vision Transformer
+            2. Decoder: Applies transformer decoder with learned query embeddings to memory
+            3. Linear Layer: Projects decoder output to patch space (8p^2 values per patch)
+            4. Unpatchify: Reshapes and rearranges output back to image format (B, 8, H, W)
+        """
+
         B = x.shape[0]
         H, W = self.H, self.W
         # 1. ViT
