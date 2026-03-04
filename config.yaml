@@ -4,16 +4,20 @@ width: 630
 encoder_path: "models/DINOv2/dinov2_vits14_reg4_pretrain.pth"
 patch: 14
 
-dataset_path: "data/train/DJIAction4/"
-batch_size: 4
-
-loss_lambda: 2.0
-
-train_result_path: "result/train/"
+train:
+  dataset_path: "data/train/DJIAction4/"
+  result_path: "result/train/"
+  batch_size: 4
+  gpu_id: 0
+  epoch: 1
+  loss_lambda: 2.0
 
 eval:
   model_path: "models/IOPEN/latest.pth"
-  original_img_dir: "data/eval/frame/"
-  masked_img_dirs: ["data/eval/masked_l/", "data/eval/masked_r/"]
-  output_dir: "data/eval/result/"
-  frame_cnt: 300
+  # original_img_dir: "data/eval/frame/"
+  # masked_img_dirs: ["data/eval/masked_l/", "data/eval/masked_r/"]
+  # output_dir: "data/eval/result/"
+  frame_cnt: 10
+  original_img_dir: "data/validate/rgb/"
+  masked_img_dirs: ["data/validate/masked/"]
+  output_dir: "data/validate/result/"

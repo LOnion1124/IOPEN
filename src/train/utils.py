@@ -1,4 +1,3 @@
-from src.config import cfg, args
 import torch
 import torch.nn.functional as F
 
@@ -62,30 +61,3 @@ def get_loss(pred, gt, lambda_weight=2.0, temperature=1.0):
     loss = loss_coarse + lambda_weight * loss_fine
     
     return loss, loss_coarse, loss_fine
-
-# def train_step(model, optimizer, batch):
-#     """
-#     Executes a single training step for the model.
-#     Performs forward pass, computes loss, and updates model parameters through
-#     backpropagation.
-#     Args:
-#         model: The neural network model to train.
-#         optimizer: The optimizer used for model parameter updates.
-#         batch (dict): A dictionary containing:
-#             - 'img': Input images tensor.
-#             - 'heatmap': Ground truth heatmap tensor.
-#     Returns:
-#         dict: A dictionary containing loss values:
-#             - 'total': Total loss value (float).
-#             - 'coarse': Coarse-level loss value (float).
-#             - 'fine': Fine-level loss value (float).
-#     """
-#     model.train()
-#     img = batch['img']
-#     heatmap = batch['heatmap']
-#     optimizer.zero_grad()
-#     pred_heatmap = model(img)
-#     loss, loss_coarse, loss_fine = get_loss(pred=pred_heatmap, gt=heatmap)
-#     loss.backward()
-#     optimizer.step()
-#     return {'total': loss.item, 'coarse': loss_coarse.item(), 'fine':loss_fine.item()}

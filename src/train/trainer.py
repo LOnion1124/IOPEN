@@ -4,7 +4,7 @@ from typing import Optional
 
 import torch
 
-from src.config import cfg, args
+from src.config import cfg, args, get_device
 from src.datasets import make_dataloader
 from src.models import make_network
 from .utils import get_loss
@@ -24,7 +24,7 @@ class IOPENTrainer:
         save_interval: int = 1,
         temperature: float = 1.0,
     ):
-        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device or get_device()
         self.model = model or make_network()
         self.model = self.model.to(self.device)
         self.dataloader = dataloader or make_dataloader()
@@ -36,7 +36,7 @@ class IOPENTrainer:
         self.ckpt_dir = ckpt_dir
         self.save_interval = save_interval
         self.temperature = temperature
-        self.lambda_weight = cfg.get("loss_lambda", 2.0)
+        self.lambda_weight = cfg['train'].get("loss_lambda", 2.0)
 
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay
@@ -59,7 +59,7 @@ class IOPENTrainer:
             "global_step": self.global_step,
             "model_state": self.model.state_dict(),
             "optimizer_state": self.optimizer.state_dict(),
-            "cfg": cfg,
+            "cfg": cfg['train'],
         }
         torch.save(payload, ckpt_path)
 
