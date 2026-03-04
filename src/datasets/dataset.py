@@ -39,8 +39,8 @@ class IOPENDataset(Dataset):
         # Generate heatmap with adjusted camera parameters
         heatmap = gen_heatmap(camera_adjusted, model, cam_R_m2c, cam_t_m2c)
 
-        img_dinov2 = torch.from_numpy(img_dinov2).permute(2, 0, 1).float().cuda()
-        heatmap = torch.from_numpy(heatmap).float().cuda()
+        img_dinov2 = torch.from_numpy(img_dinov2).permute(2, 0, 1).float()
+        heatmap = torch.from_numpy(heatmap).float()
 
         return {'img': img_dinov2, 'heatmap': heatmap}
 
@@ -48,7 +48,7 @@ def make_dataset():
     """
     Create and return the IOPEN dataset.
     """
-    data_root = cfg['dataset_path']
+    data_root = cfg['train']['dataset_path']
     dataset = IOPENDataset(data_root)
     return dataset
 
@@ -57,6 +57,6 @@ def make_dataloader():
     Create and return the IOPEN dataloader.
     """
     dataset = make_dataset()
-    B = cfg['batch_size']
+    B = cfg['train']['batch_size']
     dataloader = DataLoader(dataset, batch_size=B, shuffle=True)
     return dataloader

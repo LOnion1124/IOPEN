@@ -1,4 +1,4 @@
-from src.config import cfg, args
+from src.config import cfg, args, get_device
 from .utils import *
 from src.models import make_network
 import torch
@@ -6,11 +6,13 @@ import imageio.v3 as iio
 import tqdm
 
 class IOPENEvaluator:
-    def __init__(self, device='cuda'):
+    def __init__(self, device=None):
         self.eval_cfg = cfg['eval']
-        self.device = device
-        self.model = make_network().to(device)
-        model_state = torch.load(self.eval_cfg['model_path'])
+        self.device = device or get_device()
+        self.model = make_network().to(self.device)
+        model_state = torch.load(self.eval_cfg['model_path'], map_location=self.device)
+        if isinstance(model_state, dict) and 'model_state' in model_state:
+            model_state = model_state['model_state']
         self.model.load_state_dict(model_state)
 
     def inference(self, imgs):
@@ -29,8 +31,8 @@ class IOPENEvaluator:
             original_img, masked_imgs = load_frame_src(frame_id, original_dir, masked_dirs)
             corners = self.inference(masked_imgs)
             frame = draw_border(corners, original_img)
-            iio.imwrite(f'{output_dir}/{frame_id:06d}.png', frame)
+            iio.imwrite(f'{output_dir}/{frame_id:06d}.jpg', frame)
 
 def make_evaluator():
-    evaluator = IOPENEvaluator(device='cuda')
+    evaluator = IOPENEvaluator()
     return evaluator

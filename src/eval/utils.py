@@ -36,12 +36,12 @@ def gen_coords(heatmap):
     return coords
 
 def load_frame_src(frame_id, original_dir, masked_dirs):
-    original_path = original_dir + 'frame_' + str(frame_id).zfill(6) + '.png'
+    original_path = original_dir + str(frame_id).zfill(6) + '.jpg'
     original_img = iio.imread(original_path)
     original_img = preprocess_image_for_dinov2(original_img)
     masked_imgs = []
     for masked_dir in masked_dirs:
-        masked_img_path = masked_dir + 'frame_' + str(frame_id).zfill(6) + '.png'
+        masked_img_path = masked_dir + str(frame_id).zfill(6) + '.png'
         masked_img = iio.imread(masked_img_path)
         masked_img = preprocess_image_for_dinov2(masked_img)
         masked_imgs.append(masked_img)

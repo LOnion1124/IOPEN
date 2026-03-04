@@ -66,5 +66,5 @@ def make_network():
     """
     Create and return the IOPEN network.
     """
-    network = IOPEN().cuda()
+    network = IOPEN()
     return network

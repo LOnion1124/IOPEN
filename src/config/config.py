@@ -1,15 +1,16 @@
 import yaml
 import argparse
 import json
+import torch
 
 cfg = {}
 
 with open('config.yaml', 'r') as file:
    cfg = yaml.safe_load(file)
 
-if cfg['dataset_path'] is not None:
-   cam_path = cfg['dataset_path'] + "camera.json"
-   obj_path = cfg['dataset_path'] + "models/models_info.json"
+if cfg['train']['dataset_path'] is not None:
+   cam_path = cfg['train']['dataset_path'] + "camera.json"
+   obj_path = cfg['train']['dataset_path'] + "models/models_info.json"
 
    with open(cam_path) as f:
       cam_cfg = json.load(f)
@@ -21,3 +22,10 @@ if cfg['dataset_path'] is not None:
 
 parser = argparse.ArgumentParser()
 args = parser.parse_known_args()
+
+
+def get_device() -> torch.device:
+   if torch.cuda.is_available():
+      gpu_id = int(cfg['train'].get('gpu_id', 0))
+      return torch.device(f"cuda:{gpu_id}")
+   return torch.device("cpu")
