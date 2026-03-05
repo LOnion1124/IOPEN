@@ -1,0 +1,10 @@
+name: iopen
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - torchaudio
+  - pytorch-cuda=12.1
+  - pytorch
+  - torchvision
+prefix: C:\Users\24898\miniconda3\envs\iopen
