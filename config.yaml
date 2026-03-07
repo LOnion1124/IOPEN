@@ -7,10 +7,10 @@ patch: 14
 train:
   dataset_path: "data/train/DJIAction4/"
   result_path: "result/train/"
-  batch_size: 4
+  batch_size: 16
   gpu_id: 0
   epoch: 1
-  loss_lambda: 2.0
+  loss_lambda: 1.0
 
 eval:
   model_path: "models/IOPEN/latest.pth"
