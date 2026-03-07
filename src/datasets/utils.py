@@ -61,7 +61,7 @@ def adjust_camera_params(camera, original_h, original_w, new_h, new_w):
     
     return camera_adjusted
 
-def gen_heatmap(camera, model, cam_R_m2c, cam_t_m2c):
+def gen_heatmap(camera, model, cam_R_m2c, cam_t_m2c, obj_size):
     """
     Generate a heatmap for 3D bounding box keypoints projected onto image.
     
@@ -95,16 +95,16 @@ def gen_heatmap(camera, model, cam_R_m2c, cam_t_m2c):
     bbox_2d = np.array(bbox_2d) # shape (8, 2)
 
     heatmap = np.zeros((8, H, W), dtype=np.float32)
-    sigma = 5  # Standard deviation for Gaussian
+    denominator = (obj_size / 10) ** 2  # Standard deviation for Gaussian
 
     for i, (u, v) in enumerate(bbox_2d):
         u, v = int(round(u)), int(round(v))
         if 0 <= u < W and 0 <= v < H:
             y, x = np.ogrid[:H, :W]
-            gaussian = np.exp(-((x - u)**2 + (y - v)**2) / (2 * sigma**2))
+            gaussian = np.exp(-((x - u)**2 + (y - v)**2) ** 0.5 / denominator)
             heatmap[i] = gaussian
 
-    return heatmap
+    return heatmap, bbox_2d
 
 def load_data(root, num_scene=6, img_per_scene=1000):
     """
@@ -131,7 +131,8 @@ def load_data(root, num_scene=6, img_per_scene=1000):
         'rgb_path': [],
         'mask_path': [],
         'cam_R_m2c': [],
-        'cam_t_m2c': []
+        'cam_t_m2c': [],
+        'obj_size': []
     }
     for scene_id in range(num_scene):
         scene_path = "00000" + str(scene_id) + "/"
@@ -150,11 +151,14 @@ def load_data(root, num_scene=6, img_per_scene=1000):
                 cam_t_m2c = scene_gt[str(i)][j]["cam_t_m2c"]
 
                 visib_fract = scene_gt_info[str(i)][j]["visib_fract"]
+                x, y, h, w = scene_gt_info[str(i)][j]["bbox_obj"]
+                obj_size = 0.5 * ((h**2 + w**2) ** 0.5)
 
-                if visib_fract > 0.2:
+                if visib_fract > 0.8:
                     data_dict['samples']['rgb_path'].append(rgb_path)
                     data_dict['samples']['mask_path'].append(mask_path)
                     data_dict['samples']['cam_R_m2c'].append(cam_R_m2c)
                     data_dict['samples']['cam_t_m2c'].append(cam_t_m2c)
+                    data_dict['samples']['obj_size'].append(obj_size)
 
     return data_dict

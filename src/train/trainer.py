@@ -22,7 +22,9 @@ class IOPENTrainer:
         log_interval: int = 20,
         ckpt_dir: str = "result/train",
         save_interval: int = 1,
-        temperature: float = 1.0,
+        temperature: float = 0.05,
+        alpha: float = 50.0,
+        use_adaptive_weight: bool = True,
     ):
         self.device = device or get_device()
         self.model = model or make_network()
@@ -36,7 +38,9 @@ class IOPENTrainer:
         self.ckpt_dir = ckpt_dir
         self.save_interval = save_interval
         self.temperature = temperature
-        self.lambda_weight = cfg['train'].get("loss_lambda", 2.0)
+        self.alpha = alpha
+        self.use_adaptive_weight = use_adaptive_weight
+        self.lambda_weight = cfg['train'].get("loss_lambda", 1.0)
 
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay
@@ -50,7 +54,8 @@ class IOPENTrainer:
     def _move_batch_to_device(self, batch):
         img = batch["img"].to(self.device)
         heatmap = batch["heatmap"].to(self.device)
-        return img, heatmap
+        coords = batch["coords"].to(self.device)
+        return img, heatmap, coords
 
     def save_checkpoint(self, epoch: int):
         ckpt_path = os.path.join(self.ckpt_dir, f"checkpoint_epoch_{epoch:04d}.pth")
@@ -79,15 +84,17 @@ class IOPENTrainer:
         start_time = time.time()
 
         for batch_idx, batch in enumerate(self.dataloader):
-            img, heatmap = self._move_batch_to_device(batch)
+            img, heatmap, coords = self._move_batch_to_device(batch)
 
             self.optimizer.zero_grad(set_to_none=True)
             pred_heatmap = self.model(img)
             loss, loss_coarse, loss_fine = get_loss(
                 pred=pred_heatmap,
-                gt=heatmap,
+                gt={'heatmap': heatmap, 'coords': coords},
                 lambda_weight=self.lambda_weight,
                 temperature=self.temperature,
+                alpha=self.alpha,
+                use_adaptive_weight=self.use_adaptive_weight,
             )
             loss.backward()
             self.optimizer.step()

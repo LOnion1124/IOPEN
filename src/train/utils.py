@@ -34,30 +34,54 @@ def soft_argmax_2d(heatmap, temperature=1.0):
     
     return coords
 
-def get_loss(pred, gt, lambda_weight=2.0, temperature=1.0):
+def get_loss(pred, gt, lambda_weight=1.0, temperature=0.05, alpha=50.0, use_adaptive_weight=True):
     """
-    Combined loss for heatmap-based corner detection
+    Combined loss for heatmap-based corner detection with foreground weighting
     Args:
-        pred: (B, 8, H, W) predicted heatmaps
-        gt: (B, 8, H, W) ground truth heatmaps
-        lambda_weight: weight for fine coordinate loss
-        temperature: softmax temperature for soft-argmax
+        pred: (B, 8, H, W) predicted heatmap logits (before sigmoid)
+        gt: dict with 'heatmap' (B, 8, H, W) [0,1] and 'coords' (B, 8, 2) normalized [0,1]
+        lambda_weight: weight for fine coordinate loss (used as target ratio if adaptive)
+        temperature: softmax temperature for soft-argmax (smaller = sharper)
+        alpha: foreground weight multiplier (higher = more focus on peaks)
+        use_adaptive_weight: if True, auto-balance loss scales; lambda_weight becomes target ratio
     Returns:
-        loss: scalar total loss value
-        loss_coarse: scalar coarse heatmap loss
-        loss_fine: scalar fine coordinate loss
+        loss: scalar total loss
+        loss_coarse: scalar weighted BCE heatmap loss
+        loss_fine: scalar coordinate loss
     """
-    # Coarse loss: SmoothL1 on heatmaps
-    loss_coarse = F.smooth_l1_loss(pred, gt)
+    gt_heatmap, gt_coords = gt['heatmap'], gt['coords']
+    
+    # Coarse loss: Foreground-weighted BCE on heatmaps
+    # Weight: w = 1 + alpha * gt (higher weight on Gaussian peaks)
+    pos_weight = 1.0 + alpha * gt_heatmap  # (B, 8, H, W)
+    
+    # Binary cross-entropy with logits (numerically stable)
+    bce_loss = F.binary_cross_entropy_with_logits(pred, gt_heatmap, reduction='none')
+    
+    # Apply foreground weighting
+    weighted_bce = bce_loss * pos_weight
+    loss_coarse = weighted_bce.mean()
     
     # Fine loss: differentiable coordinate loss using soft-argmax
-    pred_coords = soft_argmax_2d(pred, temperature)  # (B, 8, 2)
-    gt_coords = soft_argmax_2d(gt, temperature)      # (B, 8, 2)
+    # Apply sigmoid to logits before soft-argmax to get proper probability distribution
+    pred_prob = torch.sigmoid(pred)
+    pred_coords = soft_argmax_2d(pred_prob, temperature)  # (B, 8, 2)
     
     # Calculate fine loss on normalized coordinates
     loss_fine = F.smooth_l1_loss(pred_coords, gt_coords)
     
-    # Total loss with lambda weighting
-    loss = loss_coarse + lambda_weight * loss_fine
+    # Adaptive weight balancing: auto-adjust to keep losses at similar scale
+    if use_adaptive_weight:
+        # Compute adaptive lambda to maintain target ratio
+        # Target: loss_fine_weighted / loss_coarse = lambda_weight
+        # So: adaptive_lambda = lambda_weight * loss_coarse / (loss_fine + 1e-8)
+        with torch.no_grad():
+            adaptive_lambda = lambda_weight * loss_coarse / (loss_fine + 1e-8)
+            # Clip to reasonable range to avoid instability
+            adaptive_lambda = torch.clamp(adaptive_lambda, 0.001, 100.0)
+        loss = loss_coarse + adaptive_lambda * loss_fine
+    else:
+        # Fixed weight (original behavior)
+        loss = loss_coarse + lambda_weight * loss_fine
     
     return loss, loss_coarse, loss_fine

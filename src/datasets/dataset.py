@@ -24,6 +24,7 @@ class IOPENDataset(Dataset):
 
         cam_R_m2c = np.array(self.data_dict['samples']['cam_R_m2c'][index], dtype=np.float32).reshape(3, 3)
         cam_t_m2c = np.array(self.data_dict['samples']['cam_t_m2c'][index], dtype=np.float32).reshape(3, 1)
+        obj_size = self.data_dict['samples']['obj_size'][index]
 
         # Generate masked image
         img_original = gen_masked_img(rgb, mask)
@@ -37,12 +38,13 @@ class IOPENDataset(Dataset):
         camera_adjusted = adjust_camera_params(camera, original_h, original_w, new_h, new_w)
         
         # Generate heatmap with adjusted camera parameters
-        heatmap = gen_heatmap(camera_adjusted, model, cam_R_m2c, cam_t_m2c)
+        heatmap, coords = gen_heatmap(camera_adjusted, model, cam_R_m2c, cam_t_m2c, obj_size)
 
         img_dinov2 = torch.from_numpy(img_dinov2).permute(2, 0, 1).float()
         heatmap = torch.from_numpy(heatmap).float()
+        coords = torch.from_numpy(coords).float()
 
-        return {'img': img_dinov2, 'heatmap': heatmap}
+        return {'img': img_dinov2, 'heatmap': heatmap, 'coords': coords}
 
 def make_dataset():
     """
