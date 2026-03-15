@@ -2,7 +2,7 @@ import torch
 import cv2
 import numpy as np
 import imageio.v3 as iio
-from src.datasets.utils import preprocess_image_for_dinov2
+from src.config import cfg, args
 
 def gen_coords(heatmap):
     """
@@ -35,32 +35,22 @@ def gen_coords(heatmap):
         coords.append(batch_coords)
     return coords
 
-def load_frame_src(frame_id, original_dir, masked_dirs):
-    original_path = original_dir + str(frame_id).zfill(6) + '.jpg'
-    original_img = iio.imread(original_path)
-    original_img = preprocess_image_for_dinov2(original_img)
-    masked_imgs = []
-    for masked_dir in masked_dirs:
-        masked_img_path = masked_dir + str(frame_id).zfill(6) + '.png'
-        masked_img = iio.imread(masked_img_path)
-        masked_img = preprocess_image_for_dinov2(masked_img)
-        masked_imgs.append(masked_img)
-    return original_img, masked_imgs
-
-def draw_border(obj_corners, img):
+def draw_border(obj_corners, img, color_list=None):
     """
-    Draw 3D bounding boxes on an image by connecting corner points.
-    This function takes a list of 3D bounding box corners and draws them on the provided image
-    by connecting the corners with green lines to visualize the bounding boxes.
-    Args:
-        obj_corners (list): A list of shape (N, 8, 2) containing N sets of 3D bounding box corner points.
-                           Each set contains 8 corner points with (x, y) coordinates representing:
-                           - 0-3: Top face corners
-                           - 4-7: Bottom face corners
-        img (torch.Tensor or numpy.ndarray): Input image of shape (H, W, 3) where the bounding boxes will be drawn.
-    Returns:
-        numpy.ndarray: The input image with drawn 3D bounding boxes overlaid as green lines.
+    Draws 3D bounding box borders on an image by connecting corner points.
+        obj_corners (list): List of shape (N, 8, 2), where each element contains 8 (x, y) corner coordinates for a 3D bounding box.
+                            - Indices 0-3: Top face corners
+                            - Indices 4-7: Bottom face corners
+        img (torch.Tensor or numpy.ndarray): Input image of shape (H, W, 3) or (3, H, W), on which the bounding boxes will be drawn.
+        color_list (list, optional): List of BGR color tuples for each bounding box. Defaults to green [(0, 255, 0)].
+        numpy.ndarray: Image with 3D bounding box borders drawn.
+    Raises:
+        ValueError: If the input image does not have 3 dimensions.
+    Notes:
+        - The function connects corners to form the top and bottom faces, as well as vertical edges of the bounding box.
+        - Handles both PyTorch tensors and NumPy arrays as input images.
     """
+    
     if isinstance(img, torch.Tensor):
         img = img.detach().cpu().numpy()
 
@@ -72,7 +62,10 @@ def draw_border(obj_corners, img):
 
     img = np.ascontiguousarray(img)
 
-    for corners in obj_corners:
+    if not color_list:
+        color_list = [(0, 255, 0)]
+
+    for idx, corners in enumerate(obj_corners):
         # corners is a (8, 2) list containing 8 3D bounding box
         # corner points' cordinates for one object
         # Draw lines connecting the 8 corners to form a 3D bounding box
@@ -81,9 +74,11 @@ def draw_border(obj_corners, img):
                  (4, 5), (5, 6), (6, 7), (7, 4),  # bottom face
                  (0, 4), (1, 5), (2, 6), (3, 7)]  # vertical edges
 
+        color = tuple(map(int, color_list[idx % len(color_list)]))
+
         for edge in edges:
             pt1 = tuple(map(int, corners[edge[0]]))
             pt2 = tuple(map(int, corners[edge[1]]))
-            cv2.line(img, pt1, pt2, (0, 255, 0), 2)
+            cv2.line(img, pt1, pt2, color, 2)
     
     return img

@@ -1,28 +1,9 @@
 import numpy as np
 import json
 import cv2
-
-def preprocess_image_for_dinov2(image, patch_size=14):
-    """
-    Resize image dimensions to be multiples of patch_size for DINOv2.
-    
-    :param image: Input image array of shape (H, W, 3) or (H, W)
-    :param patch_size: DINOv2 patch size (default: 14 for ViT-S14)
-    :return: Resized image with dimensions as multiples of patch_size
-    """
-    H, W = image.shape[:2]
-    
-    # Calculate nearest multiple of patch_size
-    new_H = (H // patch_size) * patch_size
-    new_W = (W // patch_size) * patch_size
-    
-    # Resize using cv2
-    if new_H > 0 and new_W > 0:
-        resized = cv2.resize(image, (new_W, new_H), interpolation=cv2.INTER_LINEAR)
-    else:
-        resized = image
-    
-    return resized
+import torch
+import torch.nn.functional as F
+from src.config import cfg, args
 
 def gen_masked_img(rgb, mask):
     """
@@ -36,41 +17,24 @@ def gen_masked_img(rgb, mask):
     masked_img[mask == 0] = [0, 255, 0]
     return masked_img
 
-def adjust_camera_params(camera, original_h, original_w, new_h, new_w):
+def gen_gt(camera, model, cam_R_m2c, cam_t_m2c):
     """
-    Adjust camera intrinsic parameters after image resizing.
-    
-    :param camera: Original camera intrinsics dict with keys 'cx', 'cy', 'fx', 'fy', 'height', 'width'
-    :param original_h: Original image height
-    :param original_w: Original image width
-    :param new_h: New image height after resize
-    :param new_w: New image width after resize
-    :return: Adjusted camera parameters dict
+    Projects the 3D bounding box corners of a model onto the image plane and generates heatmaps for each keypoint.
+    Args:
+        camera (dict): Camera intrinsics with keys 'cx', 'cy', 'fx', 'fy', 'height', 'width'.
+        model (dict): Model dimensions with keys 'size_x', 'size_y', 'size_z'.
+        cam_R_m2c (np.ndarray): 3x3 rotation matrix from model to camera coordinates.
+        cam_t_m2c (np.ndarray): 3-element translation vector from model to camera coordinates.
+    Returns:
+        tuple:
+            heatmap (np.ndarray): Array of shape (8, H, W) containing Gaussian heatmaps for each projected keypoint.
+            bbox_2d (np.ndarray): Array of shape (8, 2) with 2D image coordinates of projected 3D bounding box corners.
+            bbox_2d_xyhw (tuple): Tuple (x_min, y_min, h, w) representing the padded 2D bounding box in image coordinates.
+    Notes:
+        - The heatmap for each keypoint is generated using a Gaussian centered at the projected location.
+        - Padding is applied to the 2D bounding box to account for object size.
     """
-    camera_adjusted = camera.copy()
-    
-    scale_w = new_w / original_w
-    scale_h = new_h / original_h
-    
-    camera_adjusted['width'] = new_w
-    camera_adjusted['height'] = new_h
-    camera_adjusted['cx'] = camera['cx'] * scale_w
-    camera_adjusted['cy'] = camera['cy'] * scale_h
-    camera_adjusted['fx'] = camera['fx'] * scale_w
-    camera_adjusted['fy'] = camera['fy'] * scale_h
-    
-    return camera_adjusted
 
-def gen_heatmap(camera, model, cam_R_m2c, cam_t_m2c, obj_size):
-    """
-    Generate a heatmap for 3D bounding box keypoints projected onto image.
-    
-    :param camera: Camera intrinsics dict with keys 'cx', 'cy', 'fx', 'fy', 'height', 'width'
-    :param model: Model dict with keys 'size_x', 'size_y', 'size_z'
-    :param cam_R_m2c: Camera rotation matrix (3x3)
-    :param cam_t_m2c: Camera translation vector (3,)
-    :return: Heatmap array of shape (8, H, W) with Gaussian peaks at projected keypoints
-    """
     cx, cy, fx, fy = camera['cx'], camera['cy'], camera['fx'], camera['fy']
     H, W = camera['height'], camera['width']
     dx, dy, dz = model['size_x'], model['size_y'], model['size_z']
@@ -94,6 +58,24 @@ def gen_heatmap(camera, model, cam_R_m2c, cam_t_m2c, obj_size):
         bbox_2d.append([u, v])
     bbox_2d = np.array(bbox_2d) # shape (8, 2)
 
+    # Compute obj_size as the average of length and width from projected 2D bbox corners
+    x_coords = bbox_2d[:, 0]
+    y_coords = bbox_2d[:, 1]
+    length = np.max(x_coords) - np.min(x_coords)
+    width = np.max(y_coords) - np.min(y_coords)
+    obj_size = 0.5 * (length + width)
+
+    x_min = np.min(x_coords)
+    x_max = np.max(x_coords)
+    y_min = np.min(y_coords)
+    y_max = np.max(y_coords)
+    pad = int(round(0.1 * obj_size))
+    x_min_padded = max(0, int(round(x_min)) - pad)
+    y_min_padded = max(0, int(round(y_min)) - pad)
+    h_padded = min(H - y_min_padded, int(round(y_max - y_min)) + 2 * pad)
+    w_padded = min(W - x_min_padded, int(round(x_max - x_min)) + 2 * pad)
+    bbox_2d_xyhw = (x_min_padded, y_min_padded, h_padded, w_padded)
+
     heatmap = np.zeros((8, H, W), dtype=np.float32)
     denominator = (obj_size / 10) ** 2  # Standard deviation for Gaussian
 
@@ -104,7 +86,87 @@ def gen_heatmap(camera, model, cam_R_m2c, cam_t_m2c, obj_size):
             gaussian = np.exp(-((x - u)**2 + (y - v)**2) ** 0.5 / denominator)
             heatmap[i] = gaussian
 
-    return heatmap, bbox_2d
+    return heatmap, bbox_2d, bbox_2d_xyhw
+
+def gen_cropped_data(img, heatmap, coords, bbox):
+    """
+    Crops the input image, heatmap, and coordinates based on the given bounding box.
+    Args:
+        img (np.ndarray): Input image of shape (H, W, 3).
+        heatmap (np.ndarray): Heatmap of shape (8, H, W).
+        coords (list): List of 8 (x, y) coordinates.
+        bbox (tuple): Bounding box specified as (x, y, h, w).
+    Returns:
+        tuple:
+            cropped_img (np.ndarray): Cropped image of shape (h, w, 3).
+            cropped_heatmap (np.ndarray): Cropped heatmap of shape (8, h, w).
+            cropped_coords (np.ndarray): Array of shape (8, 2) with updated coordinates.
+                Coordinates outside the crop are marked as [-1, -1].
+    """
+
+    x, y, h, w = bbox
+    cropped_img = img[y:y+h, x:x+w]
+    cropped_heatmap = heatmap[:, y:y+h, x:x+w]
+    cropped_coords = []
+    for coord in coords:
+        u, v = coord
+        cropped_u = u - x
+        cropped_v = v - y
+        if 0 <= cropped_u < w and 0 <= cropped_v < h:
+            cropped_coords.append([cropped_u, cropped_v])
+        else:
+            cropped_coords.append([-1, -1])  # Mark out-of-crop points
+    cropped_coords = np.array(cropped_coords)
+
+    return cropped_img, cropped_heatmap, cropped_coords
+
+def gen_scaled_data(img, heatmap, coords):
+    """
+    Resizes the input image and heatmap to the target dimensions specified in `cfg`,
+    and scales the coordinates accordingly.
+    Args:
+        img (torch.Tensor): Input image tensor of shape (3, H, W).
+        heatmap (torch.Tensor): Input heatmap tensor of shape (8, H, W).
+        coords (torch.Tensor): Tensor of shape (8, 2) containing 8 (x, y) coordinates.
+    Returns:
+        tuple:
+            scaled_img (torch.Tensor): Resized image tensor of shape (3, new_H, new_W).
+            scaled_heatmap (torch.Tensor): Resized heatmap tensor of shape (8, new_H, new_W).
+            scaled_coords (torch.Tensor): Scaled coordinates tensor of shape (8, 2).
+    Notes:
+        - Uses bilinear interpolation for resizing.
+        - Coordinates with negative values are not scaled.
+        - Target dimensions are taken from `cfg['height']` and `cfg['width']`.
+    """
+
+    new_H, new_W = cfg['height'], cfg['width']
+    _, H, W = img.shape
+
+    if H == new_H and W == new_W:
+        return img, heatmap, coords
+    
+    scaled_img = F.interpolate(
+        img.unsqueeze(0),
+        size=(new_H, new_W),
+        mode='bilinear',
+        align_corners=False
+    ).squeeze(0)
+
+    scaled_heatmap = F.interpolate(
+        heatmap.unsqueeze(0),
+        size=(new_H, new_W),
+        mode='bilinear',
+        align_corners=False
+    ).squeeze(0)
+
+    scale_x = new_W / W
+    scale_y = new_H / H
+    scaled_coords = coords.clone()
+    valid = (scaled_coords[:, 0] >= 0) & (scaled_coords[:, 1] >= 0)
+    scaled_coords[valid, 0] = scaled_coords[valid, 0] * scale_x
+    scaled_coords[valid, 1] = scaled_coords[valid, 1] * scale_y
+
+    return scaled_img, scaled_heatmap, scaled_coords
 
 def load_data(root, num_scene=6, img_per_scene=1000):
     """
@@ -132,7 +194,7 @@ def load_data(root, num_scene=6, img_per_scene=1000):
         'mask_path': [],
         'cam_R_m2c': [],
         'cam_t_m2c': [],
-        'obj_size': []
+        # 'obj_bbox': []
     }
     for scene_id in range(num_scene):
         scene_path = "00000" + str(scene_id) + "/"
@@ -144,6 +206,10 @@ def load_data(root, num_scene=6, img_per_scene=1000):
         for i in range(img_per_scene):
             rgb_path = scene_path + "rgb/" + str(i).zfill(6) + ".jpg"
             num_instance = len(scene_gt[str(i)])
+
+            if num_instance > 1:
+                continue
+
             for j in range(num_instance):
                 mask_path = scene_path + "mask_visib/" + str(i).zfill(6) + "_" + str(j).zfill(6) + ".png"
 
@@ -151,14 +217,13 @@ def load_data(root, num_scene=6, img_per_scene=1000):
                 cam_t_m2c = scene_gt[str(i)][j]["cam_t_m2c"]
 
                 visib_fract = scene_gt_info[str(i)][j]["visib_fract"]
-                x, y, h, w = scene_gt_info[str(i)][j]["bbox_obj"]
-                obj_size = 0.5 * ((h**2 + w**2) ** 0.5)
+                # x, y, h, w = scene_gt_info[str(i)][j]["bbox_obj"]
 
                 if visib_fract > 0.8:
                     data_dict['samples']['rgb_path'].append(rgb_path)
                     data_dict['samples']['mask_path'].append(mask_path)
                     data_dict['samples']['cam_R_m2c'].append(cam_R_m2c)
                     data_dict['samples']['cam_t_m2c'].append(cam_t_m2c)
-                    data_dict['samples']['obj_size'].append(obj_size)
+                    # data_dict['samples']['obj_bbox'].append([x, y, h, w])
 
     return data_dict

@@ -2,6 +2,7 @@ from src.config import cfg, args, get_device
 from .utils import *
 from src.models import make_network
 import torch
+import numpy as np
 import imageio.v3 as iio
 import tqdm
 
@@ -15,23 +16,34 @@ class IOPENEvaluator:
             model_state = model_state['model_state']
         self.model.load_state_dict(model_state)
 
-    def inference(self, imgs):
-        x = torch.from_numpy(np.stack(imgs)).permute(0, 3, 1, 2).float().to(self.device)
-        pred = self.model(x) # (n, 8, H, W)
-        corners = gen_coords(heatmap=pred) # (n, 8, 2) list
+    def inference(self, batch):
+        x = batch['img'].to(self.device)
+        pred = self.model(x) # (B, 8, H, W)
+        corners = gen_coords(heatmap=pred) # (B, 8, 2) list
         return corners
-
-    def evaluate(self):
-        original_dir = self.eval_cfg['original_img_dir']
-        masked_dirs = self.eval_cfg['masked_img_dirs']
+    
+    def evaluate(self, batch):
         output_dir = self.eval_cfg['output_dir']
-        frame_cnt = self.eval_cfg['frame_cnt']
 
-        for frame_id in tqdm.tqdm(range(frame_cnt), desc='Evaluating'):
-            original_img, masked_imgs = load_frame_src(frame_id, original_dir, masked_dirs)
-            corners = self.inference(masked_imgs)
-            frame = draw_border(corners, original_img)
-            iio.imwrite(f'{output_dir}/{frame_id:06d}.jpg', frame)
+        corners_gt = batch['coords'].int().tolist()
+        corners_pred = self.inference(batch)
+
+        imgs = batch['img'].detach().cpu()
+        for idx, img in enumerate(imgs):
+            img = img.permute(1, 2, 0).numpy()
+            img = np.clip(img, 0, 255).astype(np.uint8, copy=False)
+            gt = corners_gt[idx]
+            pred = corners_pred[idx]
+            result = draw_border(
+                obj_corners=[gt, pred],
+                img=img,
+                color_list=[
+                    (0, 255, 0),
+                    (0, 0, 255)
+                ]
+            )
+            result = np.clip(result, 0, 255).astype(np.uint8, copy=False)
+            iio.imwrite(f'{output_dir}/{idx:06d}.jpg', result)
 
 def make_evaluator():
     evaluator = IOPENEvaluator()
