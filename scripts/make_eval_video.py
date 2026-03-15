@@ -5,7 +5,7 @@ input_dir = "D:/projects/IOPEN/data/eval/result"
 output_dir = "D:/projects/IOPEN/data/eval/video"
 
 # Get sorted list of image files
-images = sorted([f for f in os.listdir(input_dir) if f.endswith('.png')])
+images = sorted([f for f in os.listdir(input_dir) if f.endswith('.jpg')])
 
 # Read first image to get dimensions
 first_image = cv2.imread(os.path.join(input_dir, images[0]))
