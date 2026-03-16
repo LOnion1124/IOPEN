@@ -12,9 +12,13 @@ train:
   result_path: "result/train/"
   batch_size: 32
   gpu_id: 0
-  epoch: 100
+  epoch: 700
+  log_interval: 30
+  save_interval: 100
   loss_lambda: 0.1
   use_adaptive_weight: False
+  use_checkpoint: True
+  checkpoint_path: "result/train/current.pth"
 
 eval:
   model_path: "models/IOPEN/latest.pth"
