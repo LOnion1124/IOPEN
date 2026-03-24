@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import imageio.v3 as iio
 from src.config import cfg, args
+from src.datasets.utils import gen_scaled_data
 
 def gen_coords(heatmap):
     """
@@ -82,3 +83,39 @@ def draw_border(obj_corners, img, color_list=None):
             cv2.line(img, pt1, pt2, color, 2)
     
     return img
+
+def bbox_to_crop_xyhw(bbox, img_h, img_w):
+    x, y, w, h = bbox
+
+    x0 = max(0, int(np.floor(x)))
+    y0 = max(0, int(np.floor(y)))
+    x1 = min(img_w, int(np.ceil(x + w)))
+    y1 = min(img_h, int(np.ceil(y + h)))
+
+    if x1 <= x0 or y1 <= y0:
+        return None
+
+    return x0, y0, y1 - y0, x1 - x0
+
+def preprocess_coco_image(rgb, bbox):
+    H, W = rgb.shape[:2]
+    crop = bbox_to_crop_xyhw(bbox, H, W)
+    if crop is None:
+        return None, None
+
+    x, y, h, w = crop
+    img_cropped = rgb[y:y+h, x:x+w]
+    if img_cropped.size == 0:
+        return None, None
+
+    img_cropped = torch.from_numpy(img_cropped).permute(2, 0, 1).float()
+    heatmap_dummy = torch.zeros((8, h, w), dtype=torch.float32)
+    coords_dummy = torch.zeros((8, 2), dtype=torch.float32)
+
+    img_scaled, _, _ = gen_scaled_data(
+        img_cropped,
+        heatmap_dummy,
+        coords_dummy
+    )
+
+    return img_scaled, crop

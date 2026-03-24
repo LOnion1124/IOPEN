@@ -23,3 +23,6 @@ train:
 eval:
   model_path: "models/IOPEN/latest.pth"
   output_dir: "result/eval/"
+  mode: "coco"
+  coco_path: "data/eval/instances_default.json"
+  coco_frame_dir: "data/eval/frame/"
