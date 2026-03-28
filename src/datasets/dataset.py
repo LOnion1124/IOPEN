@@ -7,7 +7,7 @@ from src.config import cfg, args
 
 class IOPENDataset(Dataset):
     def __init__(self, data_root):
-        self.data_dict = load_data(data_root, num_scene=6, img_per_scene=1000)
+        self.data_dict = load_data(data_root, num_scene=cfg['dataset']['num_scene'], img_per_scene=1000)
         self.use_mask = cfg['dataset']['use_mask']
     
     def __len__(self):

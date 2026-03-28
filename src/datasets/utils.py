@@ -3,6 +3,7 @@ import json
 import cv2
 import torch
 import torch.nn.functional as F
+import random
 from src.config import cfg, args
 
 def gen_masked_img(rgb, mask):
@@ -168,7 +169,7 @@ def gen_scaled_data(img, heatmap, coords):
 
     return scaled_img, scaled_heatmap, scaled_coords
 
-def load_data(root, num_scene=6, img_per_scene=1000):
+def load_data(root, num_scene=1, img_per_scene=1000):
     """
     Load dataset from PBR training data with scene and image filtering.
     
@@ -207,8 +208,8 @@ def load_data(root, num_scene=6, img_per_scene=1000):
             rgb_path = scene_path + "rgb/" + str(i).zfill(6) + ".jpg"
             num_instance = len(scene_gt[str(i)])
 
-            if num_instance > 1:
-                continue
+            # if num_instance > 1:
+            #     continue
 
             for j in range(num_instance):
                 mask_path = scene_path + "mask_visib/" + str(i).zfill(6) + "_" + str(j).zfill(6) + ".png"
@@ -219,11 +220,23 @@ def load_data(root, num_scene=6, img_per_scene=1000):
                 visib_fract = scene_gt_info[str(i)][j]["visib_fract"]
                 # x, y, h, w = scene_gt_info[str(i)][j]["bbox_obj"]
 
-                if visib_fract > 0.8:
+                if visib_fract > 0.2:
                     data_dict['samples']['rgb_path'].append(rgb_path)
                     data_dict['samples']['mask_path'].append(mask_path)
                     data_dict['samples']['cam_R_m2c'].append(cam_R_m2c)
                     data_dict['samples']['cam_t_m2c'].append(cam_t_m2c)
                     # data_dict['samples']['obj_bbox'].append([x, y, h, w])
+
+    # Apply random sampling based on sample_rate from config
+    sample_rate = cfg.get('dataset', {}).get('sample_rate', 1.0)
+    if sample_rate < 1.0:
+        num_samples = len(data_dict['samples']['rgb_path'])
+        num_to_keep = max(1, int(num_samples * sample_rate))
+        indices = random.sample(range(num_samples), num_to_keep)
+        
+        data_dict['samples']['rgb_path'] = [data_dict['samples']['rgb_path'][i] for i in indices]
+        data_dict['samples']['mask_path'] = [data_dict['samples']['mask_path'][i] for i in indices]
+        data_dict['samples']['cam_R_m2c'] = [data_dict['samples']['cam_R_m2c'][i] for i in indices]
+        data_dict['samples']['cam_t_m2c'] = [data_dict['samples']['cam_t_m2c'][i] for i in indices]
 
     return data_dict
