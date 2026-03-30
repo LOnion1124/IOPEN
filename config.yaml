@@ -23,8 +23,26 @@ train:
   checkpoint_path: "result/train/current.pth"
 
 eval:
-  model_path: "models/IOPEN/latest.pth"
+  model_path: "models/IOPEN/latest_bkp.pth"
   output_dir: "result/eval/"
-  mode: "coco"
+  mode: "batch"
   coco_path: "data/eval/instances_default.json"
   coco_frame_dir: "data/eval/frame/"
+  keyframe_propagation:
+    enabled: True
+    interval: 2
+    match_iou_thr: 0.1
+    match_center_thr: 2.0
+  postprocess:
+    ema_heatmap:
+      enabled: True
+      alpha: 0.7
+      track_iou_thr: 0.3
+    box_fit:
+      enabled: False
+      dims_xyz: auto
+      inner_ignore_quantile: 0.25
+      enclose_scale: 1.1
+      result_smooth:
+        enabled: True
+        alpha: 0.7
