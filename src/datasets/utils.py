@@ -105,7 +105,76 @@ def gen_cropped_data(img, heatmap, coords, bbox):
                 Coordinates outside the crop are marked as [-1, -1].
     """
 
+    H, W = img.shape[:2]
     x, y, h, w = bbox
+
+    # Randomly scale and shift the crop box while keeping all valid GT corners inside.
+    crop_aug_cfg = cfg.get('dataset', {}).get('crop_aug', {})
+    aug_enabled = crop_aug_cfg.get('enabled', True)
+    scale_min = float(crop_aug_cfg.get('scale_min', 0.9))
+    scale_max = float(crop_aug_cfg.get('scale_max', 1.2))
+    shift_ratio = float(crop_aug_cfg.get('shift_ratio', 0.1))
+
+    if aug_enabled:
+        scale_min = max(1e-3, scale_min)
+        scale_max = max(scale_min, scale_max)
+        shift_ratio = max(0.0, shift_ratio)
+
+        cx = x + w * 0.5
+        cy = y + h * 0.5
+
+        scale = random.uniform(scale_min, scale_max)
+        h_aug = max(1, int(round(h * scale)))
+        w_aug = max(1, int(round(w * scale)))
+
+        dx = random.uniform(-shift_ratio, shift_ratio) * w
+        dy = random.uniform(-shift_ratio, shift_ratio) * h
+        cx_aug = cx + dx
+        cy_aug = cy + dy
+
+        # Keep the sampled center within image so the crop is always valid.
+        half_w = 0.5 * w_aug
+        half_h = 0.5 * h_aug
+        cx_aug = float(np.clip(cx_aug, half_w, max(half_w, W - half_w)))
+        cy_aug = float(np.clip(cy_aug, half_h, max(half_h, H - half_h)))
+
+        x_aug = int(round(cx_aug - half_w))
+        y_aug = int(round(cy_aug - half_h))
+        x_aug = min(max(0, x_aug), max(0, W - w_aug))
+        y_aug = min(max(0, y_aug), max(0, H - h_aug))
+
+        valid_coords = coords[
+            (coords[:, 0] >= 0) & (coords[:, 0] < W) &
+            (coords[:, 1] >= 0) & (coords[:, 1] < H)
+        ]
+
+        if valid_coords.shape[0] > 0:
+            gt_x_min = int(np.floor(np.min(valid_coords[:, 0])))
+            gt_x_max = int(np.ceil(np.max(valid_coords[:, 0])))
+            gt_y_min = int(np.floor(np.min(valid_coords[:, 1])))
+            gt_y_max = int(np.ceil(np.max(valid_coords[:, 1])))
+
+            x_aug = min(x_aug, gt_x_min)
+            y_aug = min(y_aug, gt_y_min)
+
+            end_x = max(x_aug + w_aug, gt_x_max + 1)
+            end_y = max(y_aug + h_aug, gt_y_max + 1)
+
+            end_x = min(W, end_x)
+            end_y = min(H, end_y)
+
+            x_aug = max(0, min(x_aug, end_x - 1))
+            y_aug = max(0, min(y_aug, end_y - 1))
+            w_aug = max(1, end_x - x_aug)
+            h_aug = max(1, end_y - y_aug)
+
+        x, y, h, w = x_aug, y_aug, h_aug, w_aug
+
+    x = max(0, min(x, W - 1))
+    y = max(0, min(y, H - 1))
+    h = max(1, min(h, H - y))
+    w = max(1, min(w, W - x))
+
     cropped_img = img[y:y+h, x:x+w]
     cropped_heatmap = heatmap[:, y:y+h, x:x+w]
     cropped_coords = []
