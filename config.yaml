@@ -7,12 +7,25 @@ patch: 14
 dataset:
   use_mask: False
   num_scene: 6
+  scene_split:
+    train: [0, 1, 2, 3, 4]
+    validate: [5]
   sample_rate: 1
+  crop_aug:
+    enabled: False
+    scale_min: 0.9
+    scale_max: 1.2
+    shift_ratio: 0.1
 
 train:
   dataset_path: "data/train/DJIAction4/"
   result_path: "result/train/"
   batch_size: 4
+  val_batch_size: 4
+  validate_enabled: True
+  validate_interval: 1
+  save_best_checkpoint: True
+  best_checkpoint_path: "result/train/best.pth"
   gpu_id: 0
   epoch: 700
   log_interval: 5
@@ -24,7 +37,7 @@ train:
 
 eval:
   model_path: "models/IOPEN/latest_bkp.pth"
-  output_dir: "result/eval/"
+  output_dir: "data/eval/result"
   mode: "batch"
   coco_path: "data/eval/instances_default.json"
   coco_frame_dir: "data/eval/frame/"

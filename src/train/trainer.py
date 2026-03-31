@@ -42,6 +42,23 @@ class IOPENTrainer:
         self.use_adaptive_weight = use_adaptive_weight
         self.lambda_weight = cfg['train'].get("loss_lambda", 1.0)
 
+        train_cfg = cfg.get('train', {})
+        self.validate_enabled = bool(train_cfg.get('validate_enabled', True))
+        self.validate_interval = int(train_cfg.get('validate_interval', 1))
+        self.val_batch_size = int(train_cfg.get('val_batch_size', train_cfg.get('batch_size', 1)))
+        self.save_best_checkpoint_enabled = bool(train_cfg.get('save_best_checkpoint', True))
+        self.best_checkpoint_path = train_cfg.get(
+            'best_checkpoint_path', os.path.join(self.ckpt_dir, 'best.pth')
+        )
+        self.best_val_total = float('inf')
+        self.val_dataloader = None
+        if self.validate_enabled:
+            self.val_dataloader = make_dataloader(
+                split='validate',
+                shuffle=False,
+                batch_size=self.val_batch_size,
+            )
+
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay
         )
@@ -50,6 +67,9 @@ class IOPENTrainer:
         self.start_epoch = 0
 
         os.makedirs(self.ckpt_dir, exist_ok=True)
+        best_ckpt_dir = os.path.dirname(self.best_checkpoint_path)
+        if best_ckpt_dir:
+            os.makedirs(best_ckpt_dir, exist_ok=True)
 
     def _move_batch_to_device(self, batch):
         img = batch["img"].to(self.device)
@@ -68,12 +88,25 @@ class IOPENTrainer:
         }
         torch.save(payload, ckpt_path)
 
+    def save_best_checkpoint(self, epoch: int, val_metrics: dict):
+        payload = {
+            "epoch": epoch,
+            "global_step": self.global_step,
+            "model_state": self.model.state_dict(),
+            "optimizer_state": self.optimizer.state_dict(),
+            "cfg": cfg['train'],
+            "val_metrics": val_metrics,
+            "best_val_total": val_metrics["total"],
+        }
+        torch.save(payload, self.best_checkpoint_path)
+
     def load_checkpoint(self, ckpt_path: str):
         payload = torch.load(ckpt_path, map_location=self.device)
         self.model.load_state_dict(payload["model_state"])
         self.optimizer.load_state_dict(payload["optimizer_state"])
         self.start_epoch = int(payload.get("epoch", 0)) + 1
         self.global_step = int(payload.get("global_step", 0))
+        self.best_val_total = float(payload.get("best_val_total", self.best_val_total))
 
     def train_one_epoch(self, epoch: int):
         self.model.train()
@@ -125,6 +158,43 @@ class IOPENTrainer:
             "fine": epoch_fine / num_batches,
         }
 
+    @torch.no_grad()
+    def validate_one_epoch(self, epoch: int):
+        if self.val_dataloader is None:
+            return None
+
+        self.model.eval()
+        epoch_total = 0.0
+        epoch_coarse = 0.0
+        epoch_fine = 0.0
+        num_batches = 0
+
+        for batch in self.val_dataloader:
+            img, heatmap, coords = self._move_batch_to_device(batch)
+            pred_heatmap = self.model(img)
+            loss, loss_coarse, loss_fine = get_loss(
+                pred=pred_heatmap,
+                gt={'heatmap': heatmap, 'coords': coords},
+                lambda_weight=self.lambda_weight,
+                temperature=self.temperature,
+                alpha=self.alpha,
+                use_adaptive_weight=self.use_adaptive_weight,
+            )
+
+            num_batches += 1
+            epoch_total += float(loss.item())
+            epoch_coarse += float(loss_coarse.item())
+            epoch_fine += float(loss_fine.item())
+
+        if num_batches == 0:
+            return {"total": 0.0, "coarse": 0.0, "fine": 0.0}
+
+        return {
+            "total": epoch_total / num_batches,
+            "coarse": epoch_coarse / num_batches,
+            "fine": epoch_fine / num_batches,
+        }
+
     def train(self):
         for epoch in range(self.start_epoch, self.epochs):
             metrics = self.train_one_epoch(epoch)
@@ -133,6 +203,29 @@ class IOPENTrainer:
                 f"Loss {metrics['total']:.6f} (coarse {metrics['coarse']:.6f}, "
                 f"fine {metrics['fine']:.6f})"
             )
+
+            should_validate = (
+                self.validate_enabled and
+                self.val_dataloader is not None and
+                self.validate_interval > 0 and
+                (epoch + 1) % self.validate_interval == 0
+            )
+            if should_validate:
+                val_metrics = self.validate_one_epoch(epoch)
+                print(
+                    f"Epoch {epoch} validate | "
+                    f"Loss {val_metrics['total']:.6f} "
+                    f"(coarse {val_metrics['coarse']:.6f}, fine {val_metrics['fine']:.6f})"
+                )
+
+                if self.save_best_checkpoint_enabled and val_metrics['total'] < self.best_val_total:
+                    self.best_val_total = val_metrics['total']
+                    self.save_best_checkpoint(epoch, val_metrics)
+                    print(
+                        f"Epoch {epoch} best updated | "
+                        f"val_total {self.best_val_total:.6f} | "
+                        f"saved {self.best_checkpoint_path}"
+                    )
 
             if self.save_interval > 0 and (epoch + 1) % self.save_interval == 0:
                 self.save_checkpoint(epoch)

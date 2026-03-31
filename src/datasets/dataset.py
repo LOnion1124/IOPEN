@@ -6,8 +6,14 @@ from .utils import *
 from src.config import cfg, args
 
 class IOPENDataset(Dataset):
-    def __init__(self, data_root):
-        self.data_dict = load_data(data_root, num_scene=cfg['dataset']['num_scene'], img_per_scene=1000)
+    def __init__(self, data_root, split='train'):
+        scene_split_cfg = cfg.get('dataset', {}).get('scene_split', {})
+        scene_ids = scene_split_cfg.get(split)
+        if scene_ids is None:
+            # Backward-compatible fallback: use the first num_scene scenes.
+            scene_ids = list(range(cfg['dataset']['num_scene']))
+
+        self.data_dict = load_data(data_root, scene_ids=scene_ids, img_per_scene=1000)
         self.use_mask = cfg['dataset']['use_mask']
     
     def __len__(self):
@@ -53,19 +59,22 @@ class IOPENDataset(Dataset):
             'coords': coords_scaled
         }
 
-def make_dataset():
+def make_dataset(split='train'):
     """
     Create and return the IOPEN dataset.
     """
     data_root = cfg['train']['dataset_path']
-    dataset = IOPENDataset(data_root)
+    dataset = IOPENDataset(data_root, split=split)
     return dataset
 
-def make_dataloader():
+def make_dataloader(split='train', shuffle=None, batch_size=None):
     """
     Create and return the IOPEN dataloader.
     """
-    dataset = make_dataset()
-    B = cfg['train']['batch_size']
-    dataloader = DataLoader(dataset, batch_size=B, shuffle=True)
+    dataset = make_dataset(split=split)
+    if batch_size is None:
+        batch_size = cfg['train']['batch_size']
+    if shuffle is None:
+        shuffle = (split == 'train')
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
     return dataloader

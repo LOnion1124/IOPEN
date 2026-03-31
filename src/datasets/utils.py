@@ -238,12 +238,22 @@ def gen_scaled_data(img, heatmap, coords):
 
     return scaled_img, scaled_heatmap, scaled_coords
 
-def load_data(root, num_scene=1, img_per_scene=1000):
+def _normalize_scene_ids(scene_ids):
+    normalized = []
+    for scene_id in scene_ids:
+        if isinstance(scene_id, str):
+            scene_id = int(scene_id)
+        normalized.append(int(scene_id))
+    return sorted(set(normalized))
+
+
+def load_data(root, scene_ids=None, num_scene=1, img_per_scene=1000):
     """
     Load dataset from PBR training data with scene and image filtering.
     
     :param root: Root directory path containing models, camera.json, and train_pbr/
-    :param num_scene: Number of scenes to load (default: 6)
+    :param scene_ids: Explicit scene ids to load, e.g. [0, 1, 4]
+    :param num_scene: Fallback number of scenes to load if scene_ids is None
     :param img_per_scene: Number of images per scene to process (default: 1000)
     :return: Dictionary containing model info, camera parameters, pbr_root path, and samples with rgb/mask paths and poses
     """
@@ -266,8 +276,12 @@ def load_data(root, num_scene=1, img_per_scene=1000):
         'cam_t_m2c': [],
         # 'obj_bbox': []
     }
-    for scene_id in range(num_scene):
-        scene_path = "00000" + str(scene_id) + "/"
+    if scene_ids is None:
+        scene_ids = list(range(num_scene))
+    scene_ids = _normalize_scene_ids(scene_ids)
+
+    for scene_id in scene_ids:
+        scene_path = str(scene_id).zfill(6) + "/"
         with open(pbr_root + scene_path + "scene_gt.json") as f:
             scene_gt = json.load(f)
         with open(pbr_root + scene_path + "scene_gt_info.json") as f:
