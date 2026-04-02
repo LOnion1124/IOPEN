@@ -8,11 +8,11 @@ dataset:
   use_mask: False
   num_scene: 6
   scene_split:
-    train: [0, 1, 2, 3, 4]
-    validate: [5]
+    train: [0, 1, 2, 3]
+    validate: [4]
   sample_rate: 1
   crop_aug:
-    enabled: False
+    enabled: True
     scale_min: 0.9
     scale_max: 1.2
     shift_ratio: 0.1
@@ -27,16 +27,22 @@ train:
   save_best_checkpoint: True
   best_checkpoint_path: "result/train/best.pth"
   gpu_id: 0
-  epoch: 700
-  log_interval: 5
+  epoch: 5
+  log_interval: 50
   save_interval: 100
-  loss_lambda: 0.1
-  use_adaptive_weight: False
+  loss_lambda: 1.0
+  loss_temperature: 0.1
+  loss_alpha: 10.0
+  use_adaptive_weight: True
+  coarse_only_epochs: 5
+  early_stopping_enabled: True
+  early_stopping_patience: 10
+  early_stopping_min_delta: 0.0001
   use_checkpoint: False
   checkpoint_path: "result/train/current.pth"
 
 eval:
-  model_path: "models/IOPEN/latest_bkp.pth"
+  model_path: "models/IOPEN/latest.pth"
   output_dir: "data/eval/result"
   mode: "batch"
   coco_path: "data/eval/instances_default.json"
