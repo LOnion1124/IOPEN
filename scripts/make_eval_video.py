@@ -1,7 +1,7 @@
 import cv2
 import os
 
-input_dir = "D:/projects/IOPEN/result/eval"
+input_dir = "D:/projects/IOPEN/data/eval/result"
 output_dir = "D:/projects/IOPEN/data/eval/video"
 
 # Get sorted list of image files
