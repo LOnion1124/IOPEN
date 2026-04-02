@@ -1,6 +1,24 @@
 import torch
 import torch.nn.functional as F
 
+
+def _normalize_coords(coords, height, width):
+    """
+    Normalize pixel coordinates to [0, 1] range.
+    Args:
+        coords: (B, C, 2) tensor in pixel coordinates
+        height: heatmap height
+        width: heatmap width
+    Returns:
+        normalized coords tensor with the same shape
+    """
+    coords_norm = coords.clone()
+    denom_x = max(width - 1, 1)
+    denom_y = max(height - 1, 1)
+    coords_norm[..., 0] = coords_norm[..., 0] / denom_x
+    coords_norm[..., 1] = coords_norm[..., 1] / denom_y
+    return coords_norm
+
 def soft_argmax_2d(heatmap, temperature=1.0):
     """
     Differentiable soft-argmax for 2D heatmaps
@@ -50,6 +68,7 @@ def get_loss(pred, gt, lambda_weight=1.0, temperature=0.05, alpha=50.0, use_adap
         loss_fine: scalar coordinate loss
     """
     gt_heatmap, gt_coords = gt['heatmap'], gt['coords']
+    _, _, H, W = pred.shape
     
     # Coarse loss: Foreground-weighted BCE on heatmaps
     # Weight: w = 1 + alpha * gt (higher weight on Gaussian peaks)
@@ -66,12 +85,21 @@ def get_loss(pred, gt, lambda_weight=1.0, temperature=0.05, alpha=50.0, use_adap
     # Apply sigmoid to logits before soft-argmax to get proper probability distribution
     pred_prob = torch.sigmoid(pred)
     pred_coords = soft_argmax_2d(pred_prob, temperature)  # (B, 8, 2)
-    
-    # Calculate fine loss on normalized coordinates
-    loss_fine = F.smooth_l1_loss(pred_coords, gt_coords)
+
+    # Mask invalid GT points and normalize valid coordinates to [0, 1].
+    valid = (
+        (gt_coords[..., 0] >= 0.0) & (gt_coords[..., 0] < W) &
+        (gt_coords[..., 1] >= 0.0) & (gt_coords[..., 1] < H)
+    )
+    gt_coords_norm = _normalize_coords(gt_coords, H, W)
+
+    if valid.any():
+        loss_fine = F.smooth_l1_loss(pred_coords[valid], gt_coords_norm[valid])
+    else:
+        loss_fine = pred.new_zeros(())
     
     # Adaptive weight balancing: auto-adjust to keep losses at similar scale
-    if use_adaptive_weight:
+    if use_adaptive_weight and valid.any():
         # Compute adaptive lambda to maintain target ratio
         # Target: loss_fine_weighted / loss_coarse = lambda_weight
         # So: adaptive_lambda = lambda_weight * loss_coarse / (loss_fine + 1e-8)
