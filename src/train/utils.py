@@ -81,10 +81,10 @@ def get_loss(pred, gt, lambda_weight=1.0, temperature=0.05, alpha=50.0, use_adap
     weighted_bce = bce_loss * pos_weight
     loss_coarse = weighted_bce.mean()
     
-    # Fine loss: differentiable coordinate loss using soft-argmax
-    # Apply sigmoid to logits before soft-argmax to get proper probability distribution
-    pred_prob = torch.sigmoid(pred)
-    pred_coords = soft_argmax_2d(pred_prob, temperature)  # (B, 8, 2)
+    # Fine loss: differentiable coordinate loss using soft-argmax on logits.
+    # Using logits preserves contrast; sigmoid can flatten weak early predictions and
+    # bias soft-argmax toward image center.
+    pred_coords = soft_argmax_2d(pred, temperature)  # (B, 8, 2)
 
     # Mask invalid GT points and normalize valid coordinates to [0, 1].
     valid = (

@@ -49,6 +49,9 @@ class IOPENTrainer:
         self.early_stopping_enabled = bool(early_stopping_enabled)
         self.early_stopping_patience = max(1, int(early_stopping_patience))
         self.early_stopping_min_delta = float(early_stopping_min_delta)
+        self.early_stopping_metric = str(cfg.get('train', {}).get('early_stopping_metric', 'fine')).lower()
+        if self.early_stopping_metric not in ('total', 'coarse', 'fine'):
+            self.early_stopping_metric = 'fine'
         self.no_improve_count = 0
 
         train_cfg = cfg.get('train', {})
@@ -142,13 +145,15 @@ class IOPENTrainer:
                 alpha=self.alpha,
                 use_adaptive_weight=self.use_adaptive_weight,
             )
+            # Keep a stable, interpretable total metric for logging/selection.
+            report_total = loss_coarse + self.lambda_weight * loss_fine
             optimize_loss = loss_coarse if use_coarse_only else loss
             optimize_loss.backward()
             self.optimizer.step()
 
             self.global_step += 1
             num_batches += 1
-            epoch_total += float(optimize_loss.item())
+            epoch_total += float(report_total.item())
             epoch_coarse += float(loss_coarse.item())
             epoch_fine += float(loss_fine.item())
 
@@ -195,9 +200,10 @@ class IOPENTrainer:
                 alpha=self.alpha,
                 use_adaptive_weight=self.use_adaptive_weight,
             )
+            report_total = loss_coarse + self.lambda_weight * loss_fine
 
             num_batches += 1
-            epoch_total += float(loss.item())
+            epoch_total += float(report_total.item())
             epoch_coarse += float(loss_coarse.item())
             epoch_fine += float(loss_fine.item())
 
@@ -234,10 +240,11 @@ class IOPENTrainer:
                     f"(coarse {val_metrics['coarse']:.6f}, fine {val_metrics['fine']:.6f})"
                 )
 
-                improved = val_metrics['total'] < (self.best_val_total - self.early_stopping_min_delta)
+                monitor_value = val_metrics[self.early_stopping_metric]
+                improved = monitor_value < (self.best_val_total - self.early_stopping_min_delta)
 
                 if improved:
-                    self.best_val_total = val_metrics['total']
+                    self.best_val_total = monitor_value
                     self.no_improve_count = 0
                 else:
                     self.no_improve_count += 1
@@ -253,6 +260,7 @@ class IOPENTrainer:
                 if self.early_stopping_enabled:
                     print(
                         f"Epoch {epoch} early-stop monitor | "
+                        f"metric {self.early_stopping_metric} | "
                         f"best {self.best_val_total:.6f} | "
                         f"no_improve {self.no_improve_count}/{self.early_stopping_patience}"
                     )

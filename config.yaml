@@ -6,7 +6,7 @@ patch: 14
 
 dataset:
   use_mask: False
-  num_scene: 6
+  num_scene: 5
   scene_split:
     train: [0, 1, 2, 3]
     validate: [4]
@@ -35,26 +35,27 @@ train:
   loss_alpha: 10.0
   use_adaptive_weight: True
   coarse_only_epochs: 5
-  early_stopping_enabled: True
+  early_stopping_enabled: False
   early_stopping_patience: 10
   early_stopping_min_delta: 0.0001
+  early_stopping_metric: "fine"
   use_checkpoint: False
   checkpoint_path: "result/train/current.pth"
 
 eval:
-  model_path: "models/IOPEN/latest.pth"
+  model_path: "models/IOPEN/best.pth"
   output_dir: "data/eval/result"
-  mode: "batch"
+  mode: "coco"
   coco_path: "data/eval/instances_default.json"
   coco_frame_dir: "data/eval/frame/"
   keyframe_propagation:
-    enabled: True
+    enabled: False
     interval: 2
     match_iou_thr: 0.1
     match_center_thr: 2.0
   postprocess:
     ema_heatmap:
-      enabled: True
+      enabled: False
       alpha: 0.7
       track_iou_thr: 0.3
     box_fit:
