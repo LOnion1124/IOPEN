@@ -78,13 +78,14 @@ def gen_gt(camera, model, cam_R_m2c, cam_t_m2c):
     bbox_2d_xyhw = (x_min_padded, y_min_padded, h_padded, w_padded)
 
     heatmap = np.zeros((8, H, W), dtype=np.float32)
-    denominator = (obj_size / 10) ** 2  # Standard deviation for Gaussian
+    sigma = max(obj_size / 10, 1e-3)
 
     for i, (u, v) in enumerate(bbox_2d):
         u, v = int(round(u)), int(round(v))
         if 0 <= u < W and 0 <= v < H:
             y, x = np.ogrid[:H, :W]
-            gaussian = np.exp(-((x - u)**2 + (y - v)**2) ** 0.5 / denominator)
+            dist2 = (x - u) ** 2 + (y - v) ** 2
+            gaussian = np.exp(-dist2 / (2.0 * sigma * sigma))
             heatmap[i] = gaussian
 
     return heatmap, bbox_2d, bbox_2d_xyhw
