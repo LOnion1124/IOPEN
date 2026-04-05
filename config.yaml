@@ -27,19 +27,26 @@ train:
   save_best_checkpoint: True
   best_checkpoint_path: "result/train/best.pth"
   gpu_id: 0
-  epoch: 5
+  epoch: 1000
   log_interval: 50
   save_interval: 100
   loss_lambda: 1.0
   loss_temperature: 0.1
   loss_alpha: 10.0
   use_adaptive_weight: True
+  geometry_regularization:
+    enabled: True
+    weight: 0.1
+    equal_length_weight: 1.0
+    orthogonality_weight: 1.0
+    parallel_weight: 1.0
+    eps: 0.000001
   coarse_only_epochs: 5
   early_stopping_enabled: False
   early_stopping_patience: 10
   early_stopping_min_delta: 0.0001
   early_stopping_metric: "fine"
-  use_checkpoint: False
+  use_checkpoint: True
   checkpoint_path: "result/train/current.pth"
 
 eval:
@@ -49,13 +56,13 @@ eval:
   coco_path: "data/eval/instances_default.json"
   coco_frame_dir: "data/eval/frame/"
   keyframe_propagation:
-    enabled: False
+    enabled: True
     interval: 2
     match_iou_thr: 0.1
     match_center_thr: 2.0
   postprocess:
     ema_heatmap:
-      enabled: False
+      enabled: True
       alpha: 0.7
       track_iou_thr: 0.3
     box_fit:
