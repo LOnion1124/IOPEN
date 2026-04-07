@@ -5,10 +5,15 @@ from src.config import cfg, args
 eval_mode = cfg['eval']['mode']
 evaluator = make_evaluator()
 
-if eval_mode == 'batch':
+if eval_mode == 'validate':
     val_batch_size = cfg['train'].get('val_batch_size', cfg['train']['batch_size'])
     dataloader = make_dataloader(split='validate', shuffle=False, batch_size=val_batch_size)
     batch = next(iter(dataloader))
-    evaluator.evaluate(mode='batch', batch=batch)
+    evaluator.evaluate(mode='validate', batch=batch)
+elif eval_mode == 'train':
+    train_batch_size = cfg['train'].get('batch_size')
+    dataloader = make_dataloader(split='train', shuffle=False, batch_size=train_batch_size)
+    batch = next(iter(dataloader))
+    evaluator.evaluate(mode='validate', batch=batch)
 elif eval_mode == 'coco':
     evaluator.evaluate(mode='coco')

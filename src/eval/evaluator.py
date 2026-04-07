@@ -288,10 +288,10 @@ class IOPENEvaluator:
             save_path = os.path.join(output_dir, f'{file_stem}.jpg')
             iio.imwrite(save_path, result)
     
-    def evaluate(self, mode='batch', batch=None):
+    def evaluate(self, mode='validate', batch=None):
         output_dir = self.eval_cfg['output_dir']
 
-        if mode == 'batch':
+        if mode in ('batch', 'validate'):
             corners_gt = batch['coords'].int().tolist()
             corners_pred = self.inference_batch(batch)
 
