@@ -26,13 +26,13 @@ class IOPENDataset(Dataset):
 
         rgb_path = self.data_dict['samples']['rgb_path'][index]
         rgb = iio.imread(pbr_root + rgb_path)
-        mask_path = self.data_dict['samples']['mask_path'][index]
-        mask = iio.imread(pbr_root + mask_path)
 
         cam_R_m2c = np.array(self.data_dict['samples']['cam_R_m2c'][index], dtype=np.float32).reshape(3, 3)
         cam_t_m2c = np.array(self.data_dict['samples']['cam_t_m2c'][index], dtype=np.float32).reshape(3, 1)
 
         if self.use_mask:
+            mask_path = self.data_dict['samples']['mask_path'][index]
+            mask = iio.imread(pbr_root + mask_path)
             img_original = gen_masked_img(rgb, mask) # (H, W, 3) np array
         else:
             img_original = rgb
