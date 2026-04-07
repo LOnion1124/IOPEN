@@ -13,16 +13,16 @@ class IOPEN(nn.Module):
         self.N = self.H * self.W // (self.p ** 2) # N = H * W / p^2
 
         self.vit = make_encoder()
-        self.query_embed = nn.Embedding(self.N, 384)
+        self.query_embed = nn.Embedding(self.N, 768)
         self.decoder = nn.TransformerDecoder(
             nn.TransformerDecoderLayer(
-            d_model=384,
+            d_model=768,
             nhead=8,
             dim_feedforward=2048
             ),
-            num_layers=4
+            num_layers=12
         )
-        self.fc = nn.Linear(384, 8 * self.p * self.p)
+        self.fc = nn.Linear(768, 8 * self.p * self.p)
     
     def forward(self, x):
         """
