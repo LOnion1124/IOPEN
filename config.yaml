@@ -1,15 +1,15 @@
 height: 168
 width: 168
 
-encoder_path: "models/DINOv2/dinov2_vitb14_reg4_pretrain.pth"
+encoder_path: "models/DINOv2/dinov2_vits14_reg4_pretrain.pth"
 patch: 14
 
 dataset:
   use_mask: False
-  num_scene: 2
+  num_scene: 10
   scene_split:
-    train: [0]
-    validate: [1]
+    train: [0, 1, 2, 3, 4, 5, 6, 7]
+    validate: [8, 9]
   sample_rate: 1
   crop_aug:
     enabled: True
@@ -18,17 +18,17 @@ dataset:
     shift_ratio: 0.1
 
 train:
-  dataset_path: "data/train/DJIAction4/"
-  result_path: "result/train/"
-  batch_size: 4
-  val_batch_size: 4
+  dataset_path: "/nas2/luyizhi/datasets/IOPEN/train/DJIAction4/"
+  result_path: "/nas2/luyizhi/results/IOPEN/"
+  batch_size: 32
+  val_batch_size: 64
   validate_enabled: True
   validate_interval: 1
   save_best_checkpoint: True
-  best_checkpoint_path: "result/train/best.pth"
+  best_checkpoint_path: "/nas2/luyizhi/results/IOPEN/best.pth"
   gpu_id: 0
   epoch: 1000
-  log_interval: 50
+  log_interval: 100
   save_interval: 100
   loss_lambda: 1.0
   loss_temperature: 0.1
@@ -46,23 +46,23 @@ train:
   early_stopping_patience: 10
   early_stopping_min_delta: 0.0001
   early_stopping_metric: "fine"
-  use_checkpoint: False
-  checkpoint_path: "result/train/current.pth"
+  use_checkpoint: True
+  checkpoint_path: "/nas2/luyizhi/results/IOPEN/best_bkp.pth"
 
 eval:
-  model_path: "models/IOPEN/best.pth"
+  model_path: "/nas2/luyizhi/results/IOPEN/best.pth"
   output_dir: "data/eval/result"
   mode: "coco"
   coco_path: "data/eval/instances_default.json"
   coco_frame_dir: "data/eval/frame/"
   keyframe_propagation:
-    enabled: True
+    enabled: False
     interval: 2
     match_iou_thr: 0.1
     match_center_thr: 2.0
   postprocess:
     ema_heatmap:
-      enabled: True
+      enabled: False
       alpha: 0.7
       track_iou_thr: 0.3
     box_fit:
