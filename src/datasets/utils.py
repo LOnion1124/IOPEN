@@ -292,8 +292,8 @@ def load_data(root, scene_ids=None, num_scene=1, img_per_scene=1000):
             rgb_path = scene_path + "rgb/" + str(i).zfill(6) + ".jpg"
             num_instance = len(scene_gt[str(i)])
 
-            if num_instance > 1:
-                continue
+            # if num_instance > 1:
+            #     continue
 
             for j in range(num_instance):
                 mask_path = scene_path + "mask_visib/" + str(i).zfill(6) + "_" + str(j).zfill(6) + ".png"

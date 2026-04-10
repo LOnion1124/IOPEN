@@ -7,7 +7,7 @@ def make_encoder():
     """
     Return a DINOv2 ViT encoder
     """
-    encoder = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitb14_reg')
-    checkpoint = torch.load(encoder_path, map_location='cpu', weights_only=False)
+    encoder = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')
+    checkpoint = torch.load(encoder_path, map_location='cpu')
     encoder.load_state_dict(checkpoint)
     return encoder
