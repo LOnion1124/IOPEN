@@ -1,8 +1,8 @@
 import cv2
 import os
 
-input_dir = "D:/projects/IOPEN/data/eval/result"
-output_dir = "D:/projects/IOPEN/data/eval/video"
+input_dir = "/home/luyizhi/IOPEN/data/eval/result"
+output_dir = "/home/luyizhi/IOPEN/data/eval/video"
 
 # Get sorted list of image files
 images = sorted([f for f in os.listdir(input_dir) if f.endswith('.jpg')])
