@@ -53,6 +53,16 @@ class IOPENDataset(Dataset):
             img_cropped, heatmap_cropped, coords_cropped
         )
 
+        # DINOv2 backbone expects normalized RGB input in [0,1] with ImageNet stats.
+        img_scaled = img_scaled / 255.0
+        norm_cfg = cfg.get('dataset', {}).get('normalize', {})
+        if norm_cfg.get('enabled', True):
+            mean_vals = norm_cfg.get('mean', [0.485, 0.456, 0.406])
+            std_vals = norm_cfg.get('std', [0.229, 0.224, 0.225])
+            mean = torch.tensor(mean_vals, dtype=img_scaled.dtype).view(3, 1, 1)
+            std = torch.tensor(std_vals, dtype=img_scaled.dtype).view(3, 1, 1).clamp_min(1e-6)
+            img_scaled = (img_scaled - mean) / std
+
         return {
             'img': img_scaled,
             'heatmap': heatmap_scaled,

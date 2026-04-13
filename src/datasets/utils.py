@@ -52,16 +52,27 @@ def gen_gt(camera, model, cam_R_m2c, cam_t_m2c):
     ])
 
     bbox_cam = (cam_R_m2c @ bbox_3d.T + cam_t_m2c).T # shape (8, 3)
-    bbox_2d = []
-    for x, y, z in bbox_cam:
+    bbox_2d = np.full((8, 2), -1.0, dtype=np.float32)
+    valid_proj = np.zeros(8, dtype=bool)
+    z_eps = 1e-6
+    for i, (x, y, z) in enumerate(bbox_cam):
+        if (not np.isfinite(z)) or z <= z_eps:
+            continue
         u = fx * x / z + cx
         v = fy * y / z + cy
-        bbox_2d.append([u, v])
-    bbox_2d = np.array(bbox_2d) # shape (8, 2)
+        if not (np.isfinite(u) and np.isfinite(v)):
+            continue
+        bbox_2d[i] = [u, v]
+        valid_proj[i] = True
+
+    if not np.any(valid_proj):
+        heatmap = np.zeros((8, H, W), dtype=np.float32)
+        return heatmap, bbox_2d, (0, 0, H, W)
 
     # Compute obj_size as the average of length and width from projected 2D bbox corners
-    x_coords = bbox_2d[:, 0]
-    y_coords = bbox_2d[:, 1]
+    valid_2d = bbox_2d[valid_proj]
+    x_coords = valid_2d[:, 0]
+    y_coords = valid_2d[:, 1]
     length = np.max(x_coords) - np.min(x_coords)
     width = np.max(y_coords) - np.min(y_coords)
     obj_size = 0.5 * (length + width)
@@ -81,6 +92,8 @@ def gen_gt(camera, model, cam_R_m2c, cam_t_m2c):
     sigma = max(obj_size / 10, 1e-3)
 
     for i, (u, v) in enumerate(bbox_2d):
+        if not valid_proj[i]:
+            continue
         u, v = int(round(u)), int(round(v))
         if 0 <= u < W and 0 <= v < H:
             y, x = np.ogrid[:H, :W]
@@ -260,9 +273,18 @@ def load_data(root, scene_ids=None, num_scene=1, img_per_scene=1000):
     """
     data_dict = {}
 
+    target_obj_id = int(cfg.get('dataset', {}).get('target_obj_id', 1))
+    target_obj_key = str(target_obj_id)
+
     with open(root + "models/models_info.json") as f:
         models = json.load(f)
-        data_dict['model'] = models["1"]
+        if target_obj_key in models:
+            data_dict['model'] = models[target_obj_key]
+        else:
+            # Fallback to keep backward compatibility when object id config is missing.
+            first_key = sorted(models.keys(), key=lambda x: int(x))[0]
+            data_dict['model'] = models[first_key]
+            target_obj_id = int(first_key)
     
     with open(root + "camera.json") as f:
         data_dict['camera'] = json.load(f)
@@ -287,36 +309,47 @@ def load_data(root, scene_ids=None, num_scene=1, img_per_scene=1000):
             scene_gt = json.load(f)
         with open(pbr_root + scene_path + "scene_gt_info.json") as f:
             scene_gt_info = json.load(f)
-        
-        for i in range(img_per_scene):
-            rgb_path = scene_path + "rgb/" + str(i).zfill(6) + ".jpg"
-            num_instance = len(scene_gt[str(i)])
 
-            # if num_instance > 1:
-            #     continue
+        frame_keys = sorted(scene_gt.keys(), key=lambda k: int(k))
+        if img_per_scene is not None and img_per_scene > 0:
+            frame_keys = frame_keys[:img_per_scene]
 
+        for frame_key in frame_keys:
+            anns = scene_gt.get(frame_key, [])
+            anns_info = scene_gt_info.get(frame_key, [])
+            frame_id = int(frame_key)
+            rgb_path = scene_path + "rgb/" + str(frame_id).zfill(6) + ".jpg"
+
+            num_instance = min(len(anns), len(anns_info))
             for j in range(num_instance):
-                mask_path = scene_path + "mask_visib/" + str(i).zfill(6) + "_" + str(j).zfill(6) + ".png"
+                ann = anns[j]
+                ann_info = anns_info[j]
 
-                cam_R_m2c = scene_gt[str(i)][j]["cam_R_m2c"]
-                cam_t_m2c = scene_gt[str(i)][j]["cam_t_m2c"]
+                if int(ann.get("obj_id", -1)) != target_obj_id:
+                    continue
 
-                visib_fract = scene_gt_info[str(i)][j]["visib_fract"]
-                # x, y, h, w = scene_gt_info[str(i)][j]["bbox_obj"]
+                visib_fract = float(ann_info.get("visib_fract", 0.0))
+                if visib_fract <= 0.8:
+                    continue
 
-                if visib_fract > 0.2:
-                    data_dict['samples']['rgb_path'].append(rgb_path)
-                    data_dict['samples']['mask_path'].append(mask_path)
-                    data_dict['samples']['cam_R_m2c'].append(cam_R_m2c)
-                    data_dict['samples']['cam_t_m2c'].append(cam_t_m2c)
-                    # data_dict['samples']['obj_bbox'].append([x, y, h, w])
+                mask_path = scene_path + "mask_visib/" + str(frame_id).zfill(6) + "_" + str(j).zfill(6) + ".png"
+                cam_R_m2c = ann["cam_R_m2c"]
+                cam_t_m2c = ann["cam_t_m2c"]
+
+                data_dict['samples']['rgb_path'].append(rgb_path)
+                data_dict['samples']['mask_path'].append(mask_path)
+                data_dict['samples']['cam_R_m2c'].append(cam_R_m2c)
+                data_dict['samples']['cam_t_m2c'].append(cam_t_m2c)
 
     # Apply random sampling based on sample_rate from config
     sample_rate = cfg.get('dataset', {}).get('sample_rate', 1.0)
     if sample_rate < 1.0:
         num_samples = len(data_dict['samples']['rgb_path'])
-        num_to_keep = max(1, int(num_samples * sample_rate))
-        indices = random.sample(range(num_samples), num_to_keep)
+        if num_samples > 0:
+            num_to_keep = max(1, int(num_samples * sample_rate))
+            indices = random.sample(range(num_samples), num_to_keep)
+        else:
+            indices = []
         
         data_dict['samples']['rgb_path'] = [data_dict['samples']['rgb_path'][i] for i in indices]
         data_dict['samples']['mask_path'] = [data_dict['samples']['mask_path'][i] for i in indices]
