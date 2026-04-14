@@ -61,13 +61,13 @@ eval:
   coco_path: "data/eval/instances_default.json"
   coco_frame_dir: "data/eval/frame/"
   keyframe_propagation:
-    enabled: False
+    enabled: True
     interval: 2
     match_iou_thr: 0.1
     match_center_thr: 2.0
   postprocess:
     ema_heatmap:
-      enabled: False
+      enabled: True
       alpha: 0.7
       track_iou_thr: 0.3
     box_fit:

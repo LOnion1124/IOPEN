@@ -6,6 +6,30 @@ import re
 from src.config import cfg, args
 from src.datasets.utils import gen_scaled_data
 
+
+def _normalize_image_tensor(img_tensor):
+    norm_cfg = cfg.get('dataset', {}).get('normalize', {})
+    if not norm_cfg.get('enabled', True):
+        return img_tensor
+
+    mean_vals = norm_cfg.get('mean', [0.485, 0.456, 0.406])
+    std_vals = norm_cfg.get('std', [0.229, 0.224, 0.225])
+    mean = torch.tensor(mean_vals, dtype=img_tensor.dtype, device=img_tensor.device).view(3, 1, 1)
+    std = torch.tensor(std_vals, dtype=img_tensor.dtype, device=img_tensor.device).view(3, 1, 1).clamp_min(1e-6)
+    return (img_tensor / 255.0 - mean) / std
+
+
+def _denormalize_image_tensor(img_tensor):
+    norm_cfg = cfg.get('dataset', {}).get('normalize', {})
+    if not norm_cfg.get('enabled', True):
+        return img_tensor
+
+    mean_vals = norm_cfg.get('mean', [0.485, 0.456, 0.406])
+    std_vals = norm_cfg.get('std', [0.229, 0.224, 0.225])
+    mean = torch.tensor(mean_vals, dtype=img_tensor.dtype, device=img_tensor.device).view(3, 1, 1)
+    std = torch.tensor(std_vals, dtype=img_tensor.dtype, device=img_tensor.device).view(3, 1, 1).clamp_min(1e-6)
+    return (img_tensor * std + mean) * 255.0
+
 def gen_coords(heatmap):
     """
     Extract 2D coordinates of maximum values from a batch of heatmaps.
@@ -119,7 +143,15 @@ def preprocess_coco_image(rgb, bbox):
         coords_dummy
     )
 
+    img_scaled = _normalize_image_tensor(img_scaled)
+
     return img_scaled, crop
+
+
+def denormalize_for_visualization(img_tensor):
+    if isinstance(img_tensor, torch.Tensor):
+        return _denormalize_image_tensor(img_tensor)
+    return img_tensor
 
 
 def smooth_heatmap_ema(current_heatmap, prev_heatmap, alpha=0.7):

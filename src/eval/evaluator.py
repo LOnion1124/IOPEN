@@ -295,7 +295,7 @@ class IOPENEvaluator:
             corners_gt = batch['coords'].int().tolist()
             corners_pred = self.inference_batch(batch)
 
-            imgs = batch['img'].detach().cpu()
+            imgs = denormalize_for_visualization(batch['img']).detach().cpu()
             for idx, img in enumerate(imgs):
                 img = img.permute(1, 2, 0).numpy()
                 img = np.clip(img, 0, 255).astype(np.uint8, copy=False)
