@@ -1,8 +1,8 @@
 import cv2
 import tqdm
 
-path_to_video = "D:/projects/IOPEN/data/eval/video/downsampled.mp4"
-output_dir = "D:/projects/IOPEN/data/eval/frame/"
+path_to_video = "/home/luyizhi/IOPEN/data/eval/video/raw.mp4"
+output_dir = "/home/luyizhi/IOPEN/data/eval/frame"
 
 # H, W = 480, 640
 

@@ -125,9 +125,9 @@ def _plot_sample(sample: dict, sample_idx: int, output_path: str):
 def main():
     parser = argparse.ArgumentParser(description="Visualize train/validate samples after preprocessing")
     parser.add_argument("--split", type=str, default="train", choices=["train", "validate"])
-    parser.add_argument("--num-samples", type=int, default=16)
+    parser.add_argument("--num-samples", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output-dir", type=str, default="data/eval/result/train_sample_viz")
+    parser.add_argument("--output-dir", type=str, default="data/eval/plots/train_sample_viz")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -148,7 +148,7 @@ def main():
 
     for n, idx in enumerate(indices):
         sample = dataset[idx]
-        out_path = os.path.join(args.output_dir, f"{args.split}_idx_{idx:06d}.png")
+        out_path = os.path.join(args.output_dir, f"{args.split}_{n:06d}.png")
         _plot_sample(sample, idx, out_path)
         if (n + 1) % 5 == 0 or (n + 1) == count:
             print(f"Saved {n + 1}/{count}")
