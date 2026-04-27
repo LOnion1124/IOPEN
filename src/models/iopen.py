@@ -10,19 +10,36 @@ class IOPEN(nn.Module):
 
         self.p = cfg['patch']
         self.H, self.W = cfg['height'], cfg['width']
+        self.scale = cfg['model_scale']
+
         self.N = self.H * self.W // (self.p ** 2) # N = H * W / p^2
 
         self.vit = make_encoder()
-        self.query_embed = nn.Embedding(self.N, 384)
-        self.decoder = nn.TransformerDecoder(
-            nn.TransformerDecoderLayer(
-            d_model=384,
-            nhead=8,
-            dim_feedforward=2048
-            ),
-            num_layers=4
-        )
-        self.fc = nn.Linear(384, 8 * self.p * self.p)
+
+        if self.scale == 'small':
+            self.query_embed = nn.Embedding(self.N, 384)
+            self.decoder = nn.TransformerDecoder(
+                nn.TransformerDecoderLayer(
+                d_model=384,
+                nhead=8,
+                dim_feedforward=2048
+                ),
+                num_layers=4
+            )
+            self.fc = nn.Linear(384, 8 * self.p * self.p)
+        elif self.scale == 'base':
+            self.query_embed = nn.Embedding(self.N, 768)
+            self.decoder = nn.TransformerDecoder(
+                nn.TransformerDecoderLayer(
+                d_model=768,
+                nhead=8,
+                dim_feedforward=2048
+                ),
+                num_layers=12
+            )
+            self.fc = nn.Linear(768, 8 * self.p * self.p)
+        else:
+            raise ValueError(f"Unsupported model_scale: {self.scale}. Expected 'small' or 'base'.")
     
     def forward(self, x):
         """
@@ -49,10 +66,15 @@ class IOPEN(nn.Module):
         B = x.shape[0]
         H, W = self.H, self.W
         # 1. ViT
-        memory = self.vit.forward_features(x)["x_norm_patchtokens"]  # (B, N, 384)
+        memory = self.vit.forward_features(x)["x_norm_patchtokens"]  # (B, N, D)
+        if memory.shape[-1] != self.query_embed.embedding_dim:
+            raise RuntimeError(
+                "Encoder output dim does not match decoder/query dim: "
+                f"memory={memory.shape[-1]}, query={self.query_embed.embedding_dim}."
+            )
         # 2. decoder
-        query = self.query_embed.weight.unsqueeze(1).expand(-1, B, -1)  # (N, B, 384)
-        decoder_out = self.decoder(query, memory.permute(1, 0, 2)).permute(1, 0, 2)  # (B, N, 384)
+        query = self.query_embed.weight.unsqueeze(1).expand(-1, B, -1)  # (N, B, D)
+        decoder_out = self.decoder(query, memory.permute(1, 0, 2)).permute(1, 0, 2)  # (B, N, D)
         # 3. Linear
         out = self.fc(decoder_out) # (B, N, 8p^2)
         # 4. Unpatchify
