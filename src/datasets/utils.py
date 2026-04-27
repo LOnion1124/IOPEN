@@ -6,6 +6,113 @@ import torch.nn.functional as F
 import random
 from src.config import cfg, args
 
+
+def _parse_vec3(value, default):
+    """Parse a scalar or length-3 sequence into a float vec3 numpy array."""
+    if value is None:
+        return np.array(default, dtype=np.float32)
+    if isinstance(value, (int, float)):
+        return np.array([float(value), float(value), float(value)], dtype=np.float32)
+    if isinstance(value, (list, tuple)) and len(value) == 3:
+        try:
+            return np.array([float(value[0]), float(value[1]), float(value[2])], dtype=np.float32)
+        except (TypeError, ValueError):
+            return np.array(default, dtype=np.float32)
+    return np.array(default, dtype=np.float32)
+
+
+def _build_resize_crop_meta(img_h, img_w, bbox_xywh, target_h, target_w):
+    """Build a uniform-resize + crop transform centered on the object bbox."""
+
+    x, y, bbox_w, bbox_h = bbox_xywh
+    x = float(x)
+    y = float(y)
+    bbox_w = float(bbox_w)
+    bbox_h = float(bbox_h)
+
+    if not np.isfinite([x, y, bbox_w, bbox_h]).all() or bbox_w <= 1e-6 or bbox_h <= 1e-6:
+        scale = min(float(target_w) / max(float(img_w), 1.0), float(target_h) / max(float(img_h), 1.0))
+        crop_center_x = 0.5 * float(img_w) * scale
+        crop_center_y = 0.5 * float(img_h) * scale
+    else:
+        scale = min(float(target_w) / bbox_w, float(target_h) / bbox_h)
+        crop_center_x = (x + 0.5 * bbox_w) * scale
+        crop_center_y = (y + 0.5 * bbox_h) * scale
+
+    scale = float(max(scale, 1e-6))
+    resized_h = max(1, int(round(float(img_h) * scale)))
+    resized_w = max(1, int(round(float(img_w) * scale)))
+    crop_x = int(round(crop_center_x - 0.5 * float(target_w)))
+    crop_y = int(round(crop_center_y - 0.5 * float(target_h)))
+
+    return {
+        'scale': scale,
+        'resized_h': resized_h,
+        'resized_w': resized_w,
+        'crop_x': crop_x,
+        'crop_y': crop_y,
+        'target_h': int(target_h),
+        'target_w': int(target_w),
+    }
+
+
+def _resize_tensor(tensor, size, mode='bilinear'):
+    if tensor.shape[-2:] == size:
+        return tensor
+
+    resized = F.interpolate(
+        tensor.unsqueeze(0),
+        size=size,
+        mode=mode,
+        align_corners=False,
+    )
+    return resized.squeeze(0)
+
+
+def _crop_tensor_with_padding(tensor, crop_x, crop_y, target_h, target_w):
+    channels, height, width = tensor.shape
+    output = tensor.new_zeros((channels, target_h, target_w))
+
+    src_x0 = max(0, crop_x)
+    src_y0 = max(0, crop_y)
+    src_x1 = min(width, crop_x + target_w)
+    src_y1 = min(height, crop_y + target_h)
+
+    if src_x1 <= src_x0 or src_y1 <= src_y0:
+        return output
+
+    dst_x0 = max(0, -crop_x)
+    dst_y0 = max(0, -crop_y)
+    dst_x1 = dst_x0 + (src_x1 - src_x0)
+    dst_y1 = dst_y0 + (src_y1 - src_y0)
+
+    output[:, dst_y0:dst_y1, dst_x0:dst_x1] = tensor[:, src_y0:src_y1, src_x0:src_x1]
+    return output
+
+
+def _transform_coords_with_meta(coords, meta):
+    transformed = coords.clone()
+    valid = (
+        torch.isfinite(transformed).all(dim=-1) &
+        (transformed[:, 0] >= 0) &
+        (transformed[:, 1] >= 0)
+    )
+
+    transformed[valid, 0] = transformed[valid, 0] * meta['scale'] - meta['crop_x']
+    transformed[valid, 1] = transformed[valid, 1] * meta['scale'] - meta['crop_y']
+    return transformed
+
+
+def _direct_resize_tensor(tensor, target_h, target_w, mode='bilinear'):
+    if tensor.shape[-2:] == (target_h, target_w):
+        return tensor
+    return F.interpolate(
+        tensor.unsqueeze(0),
+        size=(target_h, target_w),
+        mode=mode,
+        align_corners=False,
+    ).squeeze(0)
+
 def gen_masked_img(rgb, mask):
     """
     Generate a masked image by applying a binary mask to an RGB image.
@@ -30,7 +137,7 @@ def gen_gt(camera, model, cam_R_m2c, cam_t_m2c):
         tuple:
             heatmap (np.ndarray): Array of shape (8, H, W) containing Gaussian heatmaps for each projected keypoint.
             bbox_2d (np.ndarray): Array of shape (8, 2) with 2D image coordinates of projected 3D bounding box corners.
-            bbox_2d_xyhw (tuple): Tuple (x_min, y_min, h, w) representing the padded 2D bounding box in image coordinates.
+            bbox_2d_xywh (tuple): Tuple (x_min, y_min, w, h) representing the padded 2D bounding box in image coordinates.
     Notes:
         - The heatmap for each keypoint is generated using a Gaussian centered at the projected location.
         - Padding is applied to the 2D bounding box to account for object size.
@@ -38,7 +145,24 @@ def gen_gt(camera, model, cam_R_m2c, cam_t_m2c):
 
     cx, cy, fx, fy = camera['cx'], camera['cy'], camera['fx'], camera['fy']
     H, W = camera['height'], camera['width']
-    dx, dy, dz = model['size_x'], model['size_y'], model['size_z']
+    dx, dy, dz = float(model['size_x']), float(model['size_y']), float(model['size_z'])
+
+    gt_bbox_cfg = cfg.get('dataset', {}).get('gt_bbox_3d', {})
+    gt_bbox_enabled = bool(gt_bbox_cfg.get('enabled', False))
+    if gt_bbox_enabled:
+        scale_xyz = _parse_vec3(gt_bbox_cfg.get('scale_xyz', [1.0, 1.0, 1.0]), [1.0, 1.0, 1.0])
+        scale_xyz = np.maximum(scale_xyz, 1e-6)
+        center_offset_xyz = _parse_vec3(
+            gt_bbox_cfg.get('center_offset_xyz', [0.0, 0.0, 0.0]),
+            [0.0, 0.0, 0.0],
+        )
+    else:
+        scale_xyz = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+        center_offset_xyz = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+
+    dx *= float(scale_xyz[0])
+    dy *= float(scale_xyz[1])
+    dz *= float(scale_xyz[2])
     
     bbox_3d = np.array([
         [-dx/2, -dy/2, -dz/2],
@@ -49,7 +173,8 @@ def gen_gt(camera, model, cam_R_m2c, cam_t_m2c):
         [ dx/2, -dy/2,  dz/2],
         [ dx/2,  dy/2,  dz/2],
         [-dx/2,  dy/2,  dz/2],
-    ])
+    ], dtype=np.float32)
+    bbox_3d = bbox_3d + center_offset_xyz.reshape(1, 3)
 
     bbox_cam = (cam_R_m2c @ bbox_3d.T + cam_t_m2c).T # shape (8, 3)
     bbox_2d = np.full((8, 2), -1.0, dtype=np.float32)
@@ -67,7 +192,7 @@ def gen_gt(camera, model, cam_R_m2c, cam_t_m2c):
 
     if not np.any(valid_proj):
         heatmap = np.zeros((8, H, W), dtype=np.float32)
-        return heatmap, bbox_2d, (0, 0, H, W)
+        return heatmap, bbox_2d, (0, 0, W, H)
 
     # Compute obj_size as the average of length and width from projected 2D bbox corners
     valid_2d = bbox_2d[valid_proj]
@@ -86,7 +211,7 @@ def gen_gt(camera, model, cam_R_m2c, cam_t_m2c):
     y_min_padded = max(0, int(round(y_min)) - pad)
     h_padded = min(H - y_min_padded, int(round(y_max - y_min)) + 2 * pad)
     w_padded = min(W - x_min_padded, int(round(x_max - x_min)) + 2 * pad)
-    bbox_2d_xyhw = (x_min_padded, y_min_padded, h_padded, w_padded)
+    bbox_2d_xywh = (x_min_padded, y_min_padded, w_padded, h_padded)
 
     heatmap = np.zeros((8, H, W), dtype=np.float32)
     sigma = max(obj_size / 10, 1e-3)
@@ -101,7 +226,7 @@ def gen_gt(camera, model, cam_R_m2c, cam_t_m2c):
             gaussian = np.exp(-dist2 / (2.0 * sigma * sigma))
             heatmap[i] = gaussian
 
-    return heatmap, bbox_2d, bbox_2d_xyhw
+    return heatmap, bbox_2d, bbox_2d_xywh
 
 def gen_cropped_data(img, heatmap, coords, bbox):
     """
@@ -204,14 +329,15 @@ def gen_cropped_data(img, heatmap, coords, bbox):
 
     return cropped_img, cropped_heatmap, cropped_coords
 
-def gen_scaled_data(img, heatmap, coords):
+def gen_scaled_data(img, heatmap, coords, bbox=None, return_meta=False):
     """
-    Resizes the input image and heatmap to the target dimensions specified in `cfg`,
-    and scales the coordinates accordingly.
+    Uniformly resizes the input image, then crops or pads to the target dimensions.
     Args:
         img (torch.Tensor): Input image tensor of shape (3, H, W).
         heatmap (torch.Tensor): Input heatmap tensor of shape (8, H, W).
         coords (torch.Tensor): Tensor of shape (8, 2) containing 8 (x, y) coordinates.
+        bbox (tuple, optional): Object bbox in (x, y, w, h) format on the input image.
+        return_meta (bool, optional): If True, also return the resize/crop transform.
     Returns:
         tuple:
             scaled_img (torch.Tensor): Resized image tensor of shape (3, new_H, new_W).
@@ -219,37 +345,52 @@ def gen_scaled_data(img, heatmap, coords):
             scaled_coords (torch.Tensor): Scaled coordinates tensor of shape (8, 2).
     Notes:
         - Uses bilinear interpolation for resizing.
-        - Coordinates with negative values are not scaled.
+        - Coordinates with negative values are not transformed.
         - Target dimensions are taken from `cfg['height']` and `cfg['width']`.
     """
 
     new_H, new_W = cfg['height'], cfg['width']
     _, H, W = img.shape
 
-    if H == new_H and W == new_W:
-        return img, heatmap, coords
-    
-    scaled_img = F.interpolate(
-        img.unsqueeze(0),
-        size=(new_H, new_W),
-        mode='bilinear',
-        align_corners=False
-    ).squeeze(0)
+    if bbox is None:
+        scaled_img = _direct_resize_tensor(img, new_H, new_W)
+        scaled_heatmap = _direct_resize_tensor(heatmap, new_H, new_W)
 
-    scaled_heatmap = F.interpolate(
-        heatmap.unsqueeze(0),
-        size=(new_H, new_W),
-        mode='bilinear',
-        align_corners=False
-    ).squeeze(0)
+        scale_x = new_W / W
+        scale_y = new_H / H
+        scaled_coords = coords.clone()
+        valid = (scaled_coords[:, 0] >= 0) & (scaled_coords[:, 1] >= 0)
+        scaled_coords[valid, 0] = scaled_coords[valid, 0] * scale_x
+        scaled_coords[valid, 1] = scaled_coords[valid, 1] * scale_y
 
-    scale_x = new_W / W
-    scale_y = new_H / H
-    scaled_coords = coords.clone()
-    valid = (scaled_coords[:, 0] >= 0) & (scaled_coords[:, 1] >= 0)
-    scaled_coords[valid, 0] = scaled_coords[valid, 0] * scale_x
-    scaled_coords[valid, 1] = scaled_coords[valid, 1] * scale_y
+        if return_meta:
+            return scaled_img, scaled_heatmap, scaled_coords, None
+        return scaled_img, scaled_heatmap, scaled_coords
 
+    meta = _build_resize_crop_meta(H, W, bbox, new_H, new_W)
+    resized_size = (meta['resized_h'], meta['resized_w'])
+
+    scaled_img = _resize_tensor(img, resized_size, mode='bilinear')
+    scaled_heatmap = _resize_tensor(heatmap, resized_size, mode='bilinear')
+
+    scaled_img = _crop_tensor_with_padding(
+        scaled_img,
+        meta['crop_x'],
+        meta['crop_y'],
+        meta['target_h'],
+        meta['target_w'],
+    )
+    scaled_heatmap = _crop_tensor_with_padding(
+        scaled_heatmap,
+        meta['crop_x'],
+        meta['crop_y'],
+        meta['target_h'],
+        meta['target_w'],
+    )
+    scaled_coords = _transform_coords_with_meta(coords, meta)
+
+    if return_meta:
+        return scaled_img, scaled_heatmap, scaled_coords, meta
     return scaled_img, scaled_heatmap, scaled_coords
 
 def _normalize_scene_ids(scene_ids):

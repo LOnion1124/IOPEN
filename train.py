@@ -1,3 +1,5 @@
+# `nohup python -u train.py > train.log 2>&1 &`
+
 from src.config import cfg, args
 from src.train import make_trainer
 

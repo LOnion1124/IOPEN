@@ -1,5 +1,6 @@
 from src.config import cfg, args, get_device
 from .utils import *
+from .utils import _build_resize_crop_meta
 from src.models import make_network
 import torch
 import numpy as np
@@ -82,11 +83,14 @@ class IOPENEvaluator:
             'frame_local_idx': 0,
             'last_key_tracks': [],
         })
+        # palette = [
+        #     (0, 255, 255),
+        #     (0, 0, 255),
+        #     (255, 0, 0),
+        #     (0, 255, 0)
+        # ]
         palette = [
-            (0, 255, 255),
-            (0, 0, 255),
-            (255, 0, 0),
-            (0, 255, 0)
+            (0, 255, 255)
         ]
 
         for image_id in tqdm.tqdm(sorted_image_ids, desc='coco-eval'):
@@ -142,11 +146,9 @@ class IOPENEvaluator:
             current_tracks = []
             if is_keyframe:
                 for ann, bbox_xyxy, prev_track_id in zip(anns, ann_bboxes_xyxy, ann_prev_matches):
-                    img_scaled, crop = preprocess_coco_image(rgb_original, ann['bbox'])
+                    img_scaled, crop_meta = preprocess_coco_image(rgb_original, ann['bbox'])
                     if img_scaled is None:
                         continue
-
-                    x, y, h, w = crop
                     x_model = img_scaled.unsqueeze(0).to(self.device)
 
                     prev_heatmap = None
@@ -167,26 +169,25 @@ class IOPENEvaluator:
                             alpha=ema_alpha
                         )
 
-                    corners_pred = gen_coords(heatmap=pred_heatmap)[0]
-                    corners_norm = [
-                        (u / float(cfg['width']), v / float(cfg['height']))
-                        for u, v in corners_pred
-                    ]
-
-                    corners_on_original = []
-                    for nu, nv in corners_norm:
-                        u_original = int(round(x + nu * w))
-                        v_original = int(round(y + nv * h))
-                        u_original = min(max(u_original, x), x + w - 1)
-                        v_original = min(max(v_original, y), y + h - 1)
-                        corners_on_original.append((u_original, v_original))
+                    corners_input = gen_coords(heatmap=pred_heatmap)[0]
+                    corners_on_original = crop_coords_to_original(
+                        corners_input,
+                        crop_meta,
+                        rgb_original.shape,
+                    )
 
                     if box_fit_enabled:
+                        scale = max(crop_meta['scale'], 1e-6)
                         corners_on_original = refine_corners_with_rigid_box(
                             corners_2d=corners_on_original,
                             img_shape=rgb_original.shape,
                             camera_cfg=cfg.get('cam'),
-                            clip_xyxy=(x, y, x + w - 1, y + h - 1),
+                            clip_xyxy=(
+                                int(round(crop_meta['crop_x'] / scale)),
+                                int(round(crop_meta['crop_y'] / scale)),
+                                int(round((crop_meta['crop_x'] + crop_meta['target_w'] - 1) / scale)),
+                                int(round((crop_meta['crop_y'] + crop_meta['target_h'] - 1) / scale)),
+                            ),
                             dims_xyz=box_dims,
                             inner_ignore_quantile=box_inner_ignore_q,
                             enclose_scale=box_enclose_scale,
@@ -208,7 +209,8 @@ class IOPENEvaluator:
                         'bbox_xyxy': bbox_xyxy,
                         'track_uid': track_uid,
                         'heatmap': pred_heatmap.detach().cpu() if ema_enabled else None,
-                        'corners_norm': corners_norm,
+                        'corners_input': corners_input,
+                        'crop_meta': crop_meta,
                         'corners_on_original': corners_on_original,
                     })
             else:
@@ -217,31 +219,39 @@ class IOPENEvaluator:
                         continue
 
                     track = prev_tracks[prev_track_id]
-                    corners_norm = track.get('corners_norm')
-                    if corners_norm is None:
+                    corners_input = track.get('corners_input')
+                    if corners_input is None:
                         continue
 
-                    crop = bbox_to_crop_xyhw(ann['bbox'], rgb_original.shape[0], rgb_original.shape[1])
-                    if crop is None:
+                    crop_meta = _build_resize_crop_meta(
+                        rgb_original.shape[0],
+                        rgb_original.shape[1],
+                        ann['bbox'],
+                        cfg['height'],
+                        cfg['width'],
+                    )
+                    if crop_meta is None:
                         continue
-
-                    x, y, h, w = crop
                     track_uid = track.get('track_uid', 0)
 
-                    corners_on_original = []
-                    for nu, nv in corners_norm:
-                        u_original = int(round(x + nu * w))
-                        v_original = int(round(y + nv * h))
-                        u_original = min(max(u_original, x), x + w - 1)
-                        v_original = min(max(v_original, y), y + h - 1)
-                        corners_on_original.append((u_original, v_original))
+                    corners_on_original = crop_coords_to_original(
+                        corners_input,
+                        crop_meta,
+                        rgb_original.shape,
+                    )
 
                     if box_fit_enabled:
+                        scale = max(crop_meta['scale'], 1e-6)
                         corners_on_original = refine_corners_with_rigid_box(
                             corners_2d=corners_on_original,
                             img_shape=rgb_original.shape,
                             camera_cfg=cfg.get('cam'),
-                            clip_xyxy=(x, y, x + w - 1, y + h - 1),
+                            clip_xyxy=(
+                                int(round(crop_meta['crop_x'] / scale)),
+                                int(round(crop_meta['crop_y'] / scale)),
+                                int(round((crop_meta['crop_x'] + crop_meta['target_w'] - 1) / scale)),
+                                int(round((crop_meta['crop_y'] + crop_meta['target_h'] - 1) / scale)),
+                            ),
                             dims_xyz=box_dims,
                             inner_ignore_quantile=box_inner_ignore_q,
                             enclose_scale=box_enclose_scale,
@@ -261,7 +271,8 @@ class IOPENEvaluator:
                         'bbox_xyxy': bbox_xyxy,
                         'track_uid': track_uid,
                         'heatmap': track.get('heatmap') if ema_enabled else None,
-                        'corners_norm': corners_norm,
+                        'corners_input': corners_input,
+                        'crop_meta': crop_meta,
                         'corners_on_original': corners_on_original,
                     })
 

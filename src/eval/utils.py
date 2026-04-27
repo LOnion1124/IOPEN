@@ -4,7 +4,7 @@ import numpy as np
 import imageio.v3 as iio
 import re
 from src.config import cfg, args
-from src.datasets.utils import gen_scaled_data
+from src.datasets.utils import gen_scaled_data, _build_resize_crop_meta
 
 
 def _normalize_image_tensor(img_tensor):
@@ -123,29 +123,44 @@ def bbox_to_crop_xyhw(bbox, img_h, img_w):
     return x0, y0, y1 - y0, x1 - x0
 
 def preprocess_coco_image(rgb, bbox):
-    H, W = rgb.shape[:2]
-    crop = bbox_to_crop_xyhw(bbox, H, W)
-    if crop is None:
+    if rgb.ndim != 3 or rgb.shape[-1] < 3:
         return None, None
 
-    x, y, h, w = crop
-    img_cropped = rgb[y:y+h, x:x+w]
-    if img_cropped.size == 0:
-        return None, None
-
-    img_cropped = torch.from_numpy(img_cropped).permute(2, 0, 1).float()
-    heatmap_dummy = torch.zeros((8, h, w), dtype=torch.float32)
+    img_tensor = torch.from_numpy(rgb[..., :3]).permute(2, 0, 1).float()
+    heatmap_dummy = torch.zeros((8, rgb.shape[0], rgb.shape[1]), dtype=torch.float32)
     coords_dummy = torch.zeros((8, 2), dtype=torch.float32)
 
-    img_scaled, _, _ = gen_scaled_data(
-        img_cropped,
+    img_scaled, _, _, meta = gen_scaled_data(
+        img_tensor,
         heatmap_dummy,
-        coords_dummy
+        coords_dummy,
+        bbox=bbox,
+        return_meta=True,
     )
 
     img_scaled = _normalize_image_tensor(img_scaled)
 
-    return img_scaled, crop
+    return img_scaled, meta
+
+
+def crop_coords_to_original(coords, crop_meta, img_shape):
+    if crop_meta is None:
+        return None
+
+    scale = float(crop_meta['scale'])
+    crop_x = float(crop_meta['crop_x'])
+    crop_y = float(crop_meta['crop_y'])
+    img_h, img_w = img_shape[:2]
+
+    corners_on_original = []
+    for u, v in coords:
+        u_original = int(round((float(u) + crop_x) / scale))
+        v_original = int(round((float(v) + crop_y) / scale))
+        u_original = min(max(u_original, 0), img_w - 1)
+        v_original = min(max(v_original, 0), img_h - 1)
+        corners_on_original.append((u_original, v_original))
+
+    return corners_on_original
 
 
 def denormalize_for_visualization(img_tensor):

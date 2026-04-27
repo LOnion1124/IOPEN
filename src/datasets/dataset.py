@@ -7,11 +7,24 @@ from src.config import cfg, args
 
 class IOPENDataset(Dataset):
     def __init__(self, data_root, split='train'):
-        scene_split_cfg = cfg.get('dataset', {}).get('scene_split', {})
-        scene_ids = scene_split_cfg.get(split)
+        dataset_cfg = cfg.get('dataset', {})
+        
+        # Support both old (scene_split) and new (num_train/num_val) formats
+        scene_split_cfg = dataset_cfg.get('scene_split', {})
+        if scene_split_cfg:
+            scene_ids = scene_split_cfg.get(split)
+        else:
+            # Use num_train and num_val to generate scene_ids
+            num_train = dataset_cfg.get('num_train', 8)
+            num_val = dataset_cfg.get('num_val', 2)
+            if split == 'train':
+                scene_ids = list(range(num_train))
+            else:  # validate
+                scene_ids = list(range(num_train, num_train + num_val))
+        
         if scene_ids is None:
             # Backward-compatible fallback: use the first num_scene scenes.
-            scene_ids = list(range(cfg['dataset']['num_scene']))
+            scene_ids = list(range(dataset_cfg['num_scene']))
 
         self.data_dict = load_data(data_root, scene_ids=scene_ids, img_per_scene=1000)
         self.use_mask = cfg['dataset']['use_mask']
@@ -40,17 +53,13 @@ class IOPENDataset(Dataset):
         heatmap_original, coords_original, bbox = gen_gt(
             camera, model, cam_R_m2c, cam_t_m2c
         ) # (8, H, W) & (8, 2) np array
-        
-        img_cropped, heatmap_cropped, coords_cropped = gen_cropped_data(
-            img_original, heatmap_original, coords_original, bbox
-        ) # (H', W', 3), (8, H', W') * (8, 2) np array
 
-        img_cropped = torch.from_numpy(img_cropped).permute(2, 0, 1).float()
-        heatmap_cropped = torch.from_numpy(heatmap_cropped).float()
-        coords_cropped = torch.from_numpy(coords_cropped).float()
+        img_original = torch.from_numpy(img_original).permute(2, 0, 1).float()
+        heatmap_original = torch.from_numpy(heatmap_original).float()
+        coords_original = torch.from_numpy(coords_original).float()
 
         img_scaled, heatmap_scaled, coords_scaled = gen_scaled_data(
-            img_cropped, heatmap_cropped, coords_cropped
+            img_original, heatmap_original, coords_original, bbox=bbox
         )
 
         # DINOv2 backbone expects normalized RGB input in [0,1] with ImageNet stats.
