@@ -17,7 +17,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config import cfg
-from src.eval.utils import preprocess_coco_image, bbox_to_crop_xyhw
+from src.eval.utils import preprocess_coco_image, bbox_to_crop_xyhw, denormalize_for_visualization
+import cv2
 
 
 def visualize_coco_input(num_images=16, grid_size=4, save_path=None):
@@ -102,12 +103,16 @@ def visualize_coco_input(num_images=16, grid_size=4, save_path=None):
                 print(f"Warning: Failed to preprocess image {image_id}")
                 continue
             
-            # Convert to numpy for display
-            # img_scaled is (3, H, W) tensor in CHW format
-            img_display = img_scaled.permute(1, 2, 0).numpy().astype(np.uint8)
-            
-            # Normalize to [0, 1] for display
-            img_display = img_display / 255.0
+            # Denormalize and convert to numpy for display
+            # img_scaled is (3, H, W) tensor in CHW format and normalized
+            img_denorm = denormalize_for_visualization(img_scaled)
+            if isinstance(img_denorm, torch.Tensor):
+                img_display = img_denorm.permute(1, 2, 0).cpu().numpy()
+            else:
+                img_display = np.asarray(img_denorm)
+
+            # Clamp to valid uint8 range and normalize to [0,1] for imshow
+            img_display = np.clip(img_display, 0, 255).round().astype(np.uint8) / 255.0
             
             # Display
             ax = axes[processed_count]
@@ -216,10 +221,14 @@ def visualize_with_crop_info(num_images=16, grid_size=4, save_path=None):
             ax_orig.set_title(f"Original (ID: {image_id})", fontsize=8)
             ax_orig.axis('off')
             
-            # Show processed
+            # Show processed (denormalize first)
             ax_proc = axes[processed_count, 1]
-            img_display = img_scaled.permute(1, 2, 0).numpy().astype(np.uint8)
-            img_display = img_display / 255.0
+            img_denorm = denormalize_for_visualization(img_scaled)
+            if isinstance(img_denorm, torch.Tensor):
+                img_display = img_denorm.permute(1, 2, 0).cpu().numpy()
+            else:
+                img_display = np.asarray(img_denorm)
+            img_display = np.clip(img_display, 0, 255).round().astype(np.uint8) / 255.0
             ax_proc.imshow(img_display)
             ax_proc.set_title(f"Preprocessed\nCrop: ({x}, {y}, {w}x{h})", fontsize=8)
             ax_proc.axis('off')
@@ -248,7 +257,7 @@ if __name__ == '__main__':
     import cv2
     
     # Create output directory if needed
-    output_dir = os.path.dirname(cfg['eval']['output_dir'])
+    output_dir = os.path.dirname("/home/luyizhi/IOPEN/data/eval/plots/")
     os.makedirs(output_dir, exist_ok=True)
     
     # Visualize preprocessed images
