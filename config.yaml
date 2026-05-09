@@ -35,11 +35,11 @@ train:
   validate_enabled: True
   validate_interval: 1
   save_best_checkpoint: True
-  best_checkpoint_path: "/nas2/luyizhi/results/IOPEN/best.pth"
+  best_checkpoint_path: "/home/luyizhi/IOPEN/models/IOPEN/best.pth"
   gpu_id: 0
   epoch: 300
   log_interval: 100
-  save_interval: 10
+  save_interval: -1
   loss_lambda: 1.0
   loss_temperature: 0.1
   loss_alpha: 10.0
@@ -56,13 +56,12 @@ train:
   early_stopping_patience: 10
   early_stopping_min_delta: 0.0001
   early_stopping_metric: "fine"
-  use_checkpoint: False
-  checkpoint_path: "/nas2/luyizhi/results/IOPEN/best_bkp.pth"
+  use_checkpoint: True
+  checkpoint_path: "/home/luyizhi/IOPEN/models/IOPEN/best_bkp.pth"
 
 eval:
-  model_path: "/nas2/luyizhi/results/IOPEN/best_bkp_1.pth"
+  model_path: "/home/luyizhi/IOPEN/models/IOPEN/best_bkp.pth"
   output_dir: "data/eval/result"
-  mode: "coco"
   coco_path: "data/eval/instances_default_2464x3248.json"
   coco_frame_dir: "data/eval/frame/"
   keyframe_propagation:
@@ -70,16 +69,3 @@ eval:
     interval: 2
     match_iou_thr: 0.1
     match_center_thr: 2.0
-  postprocess:
-    ema_heatmap:
-      enabled: True
-      alpha: 0.7
-      track_iou_thr: 0.3
-    box_fit:
-      enabled: False
-      dims_xyz: auto
-      inner_ignore_quantile: 0.25
-      enclose_scale: 1.1
-      result_smooth:
-        enabled: True
-        alpha: 0.7

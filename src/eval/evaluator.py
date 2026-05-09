@@ -21,45 +21,11 @@ class IOPENEvaluator:
         self.model.load_state_dict(model_state)
         self.model.eval()
 
-    def inference_batch(self, batch):
-        x = batch['img'].to(self.device)
-        with torch.no_grad():
-            pred = self.model(x) # (B, 8, H, W)
-        corners = gen_coords(heatmap=pred) # (B, 8, 2) list
-        return corners
-
     def inference_coco(self):
         coco_path = self.eval_cfg['coco_path']
         frame_dir = self.eval_cfg['coco_frame_dir']
         output_dir = self.eval_cfg['output_dir']
         os.makedirs(output_dir, exist_ok=True)
-
-        post_cfg = self.eval_cfg.get('postprocess', {})
-        ema_cfg = post_cfg.get('ema_heatmap', {})
-        box_cfg = post_cfg.get('box_fit', {})
-        ema_enabled = bool(ema_cfg.get('enabled', False))
-        ema_alpha = float(ema_cfg.get('alpha', 0.7))
-        track_iou_thr = float(ema_cfg.get('track_iou_thr', 0.3))
-        box_fit_enabled = bool(box_cfg.get('enabled', False))
-        raw_box_dims = box_cfg.get('dims_xyz', 'auto')
-        box_dims = [1.0, 1.0, 1.0]
-        if isinstance(raw_box_dims, (list, tuple)) and len(raw_box_dims) == 3:
-            box_dims = [float(raw_box_dims[0]), float(raw_box_dims[1]), float(raw_box_dims[2])]
-        elif isinstance(raw_box_dims, str) and raw_box_dims.lower() == 'auto':
-            obj_cfg = cfg.get('obj', {}) if isinstance(cfg.get('obj', {}), dict) else {}
-            if all(k in obj_cfg for k in ('size_x', 'size_y', 'size_z')):
-                box_dims = [float(obj_cfg['size_x']), float(obj_cfg['size_y']), float(obj_cfg['size_z'])]
-            elif all(k in obj_cfg for k in ('min_x', 'max_x', 'min_y', 'max_y', 'min_z', 'max_z')):
-                box_dims = [
-                    float(obj_cfg['max_x']) - float(obj_cfg['min_x']),
-                    float(obj_cfg['max_y']) - float(obj_cfg['min_y']),
-                    float(obj_cfg['max_z']) - float(obj_cfg['min_z']),
-                ]
-        box_inner_ignore_q = float(box_cfg.get('inner_ignore_quantile', 0.25))
-        box_enclose_scale = float(box_cfg.get('enclose_scale', 1.05))
-        smooth_cfg = box_cfg.get('result_smooth', {})
-        box_smooth_enabled = bool(smooth_cfg.get('enabled', False))
-        box_smooth_alpha = float(smooth_cfg.get('alpha', 0.7))
         key_cfg = self.eval_cfg.get('keyframe_propagation', {})
         keyframe_enabled = bool(key_cfg.get('enabled', False))
         keyframe_interval = max(1, int(key_cfg.get('interval', 5)))
@@ -128,7 +94,7 @@ class IOPENEvaluator:
             ann_prev_matches = match_bboxes_to_prev_tracks(
                 current_bboxes_xyxy=ann_bboxes_xyxy,
                 prev_tracks=prev_tracks,
-                iou_thr=track_iou_thr
+                iou_thr=keyframe_match_iou
             )
 
             img_path = os.path.join(frame_dir, image_meta['file_name'])
@@ -151,23 +117,14 @@ class IOPENEvaluator:
                         continue
                     x_model = img_scaled.unsqueeze(0).to(self.device)
 
-                    prev_heatmap = None
+                    with torch.no_grad():
+                        pred_heatmap = self.model(x_model)
+
                     if prev_track_id is not None:
-                        prev_heatmap = prev_tracks[prev_track_id].get('heatmap')
                         track_uid = prev_tracks[prev_track_id].get('track_uid', 0)
                     else:
                         track_uid = next_track_uid
                         next_track_uid += 1
-
-                    with torch.no_grad():
-                        pred_heatmap = self.model(x_model)
-
-                    if ema_enabled:
-                        pred_heatmap = smooth_heatmap_ema(
-                            current_heatmap=pred_heatmap,
-                            prev_heatmap=prev_heatmap,
-                            alpha=ema_alpha
-                        )
 
                     corners_input = gen_coords(heatmap=pred_heatmap)[0]
                     corners_on_original = crop_coords_to_original(
@@ -176,39 +133,11 @@ class IOPENEvaluator:
                         rgb_original.shape,
                     )
 
-                    if box_fit_enabled:
-                        scale = max(crop_meta['scale'], 1e-6)
-                        corners_on_original = refine_corners_with_rigid_box(
-                            corners_2d=corners_on_original,
-                            img_shape=rgb_original.shape,
-                            camera_cfg=cfg.get('cam'),
-                            clip_xyxy=(
-                                int(round(crop_meta['crop_x'] / scale)),
-                                int(round(crop_meta['crop_y'] / scale)),
-                                int(round((crop_meta['crop_x'] + crop_meta['target_w'] - 1) / scale)),
-                                int(round((crop_meta['crop_y'] + crop_meta['target_h'] - 1) / scale)),
-                            ),
-                            dims_xyz=box_dims,
-                            inner_ignore_quantile=box_inner_ignore_q,
-                            enclose_scale=box_enclose_scale,
-                        )
-
-                    if box_smooth_enabled and box_fit_enabled:
-                        prev_corners = None
-                        if prev_track_id is not None:
-                            prev_corners = prev_tracks[prev_track_id].get('corners_on_original')
-                        corners_on_original = smooth_corners_ema(
-                            current_corners=corners_on_original,
-                            prev_corners=prev_corners,
-                            alpha=box_smooth_alpha
-                        )
-
                     pred_corners_list.append(corners_on_original)
                     draw_color_list.append(palette[track_uid % len(palette)])
                     current_tracks.append({
                         'bbox_xyxy': bbox_xyxy,
                         'track_uid': track_uid,
-                        'heatmap': pred_heatmap.detach().cpu() if ema_enabled else None,
                         'corners_input': corners_input,
                         'crop_meta': crop_meta,
                         'corners_on_original': corners_on_original,
@@ -240,37 +169,11 @@ class IOPENEvaluator:
                         rgb_original.shape,
                     )
 
-                    if box_fit_enabled:
-                        scale = max(crop_meta['scale'], 1e-6)
-                        corners_on_original = refine_corners_with_rigid_box(
-                            corners_2d=corners_on_original,
-                            img_shape=rgb_original.shape,
-                            camera_cfg=cfg.get('cam'),
-                            clip_xyxy=(
-                                int(round(crop_meta['crop_x'] / scale)),
-                                int(round(crop_meta['crop_y'] / scale)),
-                                int(round((crop_meta['crop_x'] + crop_meta['target_w'] - 1) / scale)),
-                                int(round((crop_meta['crop_y'] + crop_meta['target_h'] - 1) / scale)),
-                            ),
-                            dims_xyz=box_dims,
-                            inner_ignore_quantile=box_inner_ignore_q,
-                            enclose_scale=box_enclose_scale,
-                        )
-
-                    if box_smooth_enabled and box_fit_enabled:
-                        prev_corners = track.get('corners_on_original')
-                        corners_on_original = smooth_corners_ema(
-                            current_corners=corners_on_original,
-                            prev_corners=prev_corners,
-                            alpha=box_smooth_alpha
-                        )
-
                     pred_corners_list.append(corners_on_original)
                     draw_color_list.append(palette[track_uid % len(palette)])
                     current_tracks.append({
                         'bbox_xyxy': bbox_xyxy,
                         'track_uid': track_uid,
-                        'heatmap': track.get('heatmap') if ema_enabled else None,
                         'corners_input': corners_input,
                         'crop_meta': crop_meta,
                         'corners_on_original': corners_on_original,
@@ -299,32 +202,8 @@ class IOPENEvaluator:
             save_path = os.path.join(output_dir, f'{file_stem}.jpg')
             iio.imwrite(save_path, result)
     
-    def evaluate(self, mode='validate', batch=None):
-        output_dir = self.eval_cfg['output_dir']
-
-        if mode in ('batch', 'validate'):
-            corners_gt = batch['coords'].int().tolist()
-            corners_pred = self.inference_batch(batch)
-
-            imgs = denormalize_for_visualization(batch['img']).detach().cpu()
-            for idx, img in enumerate(imgs):
-                img = img.permute(1, 2, 0).numpy()
-                img = np.clip(img, 0, 255).astype(np.uint8, copy=False)
-                gt = corners_gt[idx]
-                pred = corners_pred[idx]
-                result = draw_border(
-                    obj_corners=[gt, pred],
-                    img=img,
-                    color_list=[
-                        (0, 255, 0),
-                        (0, 0, 255)
-                    ]
-                )
-                result = np.clip(result, 0, 255).astype(np.uint8, copy=False)
-                iio.imwrite(f'{output_dir}/{idx:06d}.jpg', result)
-        
-        elif mode == 'coco':
-            self.inference_coco()
+    def evaluate(self):
+        self.inference_coco()
 
 def make_evaluator():
     evaluator = IOPENEvaluator()
