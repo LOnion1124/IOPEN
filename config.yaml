@@ -8,7 +8,6 @@ patch: 14
 
 dataset:
   target_obj_id: 1
-  use_mask: False
   num_scene: 10
   num_train: 40
   num_val: 10
@@ -60,7 +59,7 @@ train:
   checkpoint_path: "/home/luyizhi/IOPEN/models/IOPEN/best_bkp.pth"
 
 eval:
-  model_path: "/home/luyizhi/IOPEN/models/IOPEN/best_bkp.pth"
+  model_path: "/home/luyizhi/IOPEN/models/IOPEN/best.pth"
   output_dir: "data/eval/result"
   coco_path: "data/eval/instances_default_2464x3248.json"
   coco_frame_dir: "data/eval/frame/"

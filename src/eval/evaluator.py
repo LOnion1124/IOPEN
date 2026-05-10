@@ -21,6 +21,15 @@ class IOPENEvaluator:
         self.model.load_state_dict(model_state)
         self.model.eval()
 
+    
+    def inference_batch(self, batch):
+        x = batch['img'].to(self.device)
+        with torch.no_grad():
+            pred = self.model(x) # (B, 8, H, W)
+        corners = gen_coords(heatmap=pred) # (B, 8, 2) list
+        return corners
+    
+
     def inference_coco(self):
         coco_path = self.eval_cfg['coco_path']
         frame_dir = self.eval_cfg['coco_frame_dir']

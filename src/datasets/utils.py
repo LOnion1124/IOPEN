@@ -1,6 +1,5 @@
 import numpy as np
 import json
-import cv2
 import torch
 import torch.nn.functional as F
 import random
@@ -112,18 +111,6 @@ def _direct_resize_tensor(tensor, target_h, target_w, mode='bilinear'):
         mode=mode,
         align_corners=False,
     ).squeeze(0)
-
-def gen_masked_img(rgb, mask):
-    """
-    Generate a masked image by applying a binary mask to an RGB image.
-    
-    :param rgb: RGB image array of shape (height, width, 3)
-    :param mask: Binary mask array of shape (height, width)
-    :return: Masked image with same shape as rgb
-    """
-    masked_img = rgb.copy()
-    masked_img[mask == 0] = [0, 255, 0]
-    return masked_img
 
 def gen_gt(camera, model, cam_R_m2c, cam_t_m2c):
     """

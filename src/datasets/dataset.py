@@ -3,7 +3,7 @@ from torch.utils.data import Dataset, DataLoader
 import imageio.v3 as iio
 import numpy as np
 from .utils import *
-from src.config import cfg, args
+from src.config import cfg
 
 class IOPENDataset(Dataset):
     def __init__(self, data_root, split='train'):
@@ -27,7 +27,7 @@ class IOPENDataset(Dataset):
             scene_ids = list(range(dataset_cfg['num_scene']))
 
         self.data_dict = load_data(data_root, scene_ids=scene_ids, img_per_scene=1000)
-        self.use_mask = cfg['dataset']['use_mask']
+        # `use_mask` is always False in current configs; skip mask code path.
     
     def __len__(self):
         return len(self.data_dict['samples']['rgb_path'])
@@ -43,12 +43,8 @@ class IOPENDataset(Dataset):
         cam_R_m2c = np.array(self.data_dict['samples']['cam_R_m2c'][index], dtype=np.float32).reshape(3, 3)
         cam_t_m2c = np.array(self.data_dict['samples']['cam_t_m2c'][index], dtype=np.float32).reshape(3, 1)
 
-        if self.use_mask:
-            mask_path = self.data_dict['samples']['mask_path'][index]
-            mask = iio.imread(pbr_root + mask_path)
-            img_original = gen_masked_img(rgb, mask) # (H, W, 3) np array
-        else:
-            img_original = rgb
+        # Masking is disabled; use raw RGB image directly
+        img_original = rgb
         
         heatmap_original, coords_original, bbox = gen_gt(
             camera, model, cam_R_m2c, cam_t_m2c
