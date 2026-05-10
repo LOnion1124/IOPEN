@@ -16,6 +16,6 @@ def make_encoder():
         raise ValueError(f"Unsupported model_scale: {scale}. Expected 'small' or 'base'.")
 
     encoder = torch.hub.load('facebookresearch/dinov2', model_name)
-    checkpoint = torch.load(encoder_path, map_location='cpu')
+    checkpoint = torch.load(encoder_path, map_location='cpu', weights_only=False)
     encoder.load_state_dict(checkpoint)
     return encoder

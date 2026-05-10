@@ -1,6 +1,6 @@
 from src.config import cfg, args, get_device
 from .utils import *
-from .utils import _build_resize_crop_meta
+from src.datasets.utils import _build_resize_crop_meta
 from src.models import make_network
 import torch
 import numpy as np
@@ -15,7 +15,7 @@ class IOPENEvaluator:
         self.eval_cfg = cfg['eval']
         self.device = device or get_device()
         self.model = make_network().to(self.device)
-        model_state = torch.load(self.eval_cfg['model_path'], map_location=self.device)
+        model_state = torch.load(self.eval_cfg['model_path'], map_location=self.device, weights_only=False)
         if isinstance(model_state, dict) and 'model_state' in model_state:
             model_state = model_state['model_state']
         self.model.load_state_dict(model_state)
