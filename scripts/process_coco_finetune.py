@@ -14,6 +14,7 @@ import numpy as np
 import imageio.v3 as iio
 import cv2
 from tqdm import tqdm
+import torch
 
 # Ensure repository root is on sys.path so `src` imports work when script
 # is executed from `scripts/` or elsewhere.
@@ -30,6 +31,14 @@ from src.eval.utils import (
 
 def mkdir_p(path):
     os.makedirs(path, exist_ok=True)
+
+
+# containers for tensors and names collected during processing
+# each entry corresponds to one saved crop image (normalized tensor shape [3,H,W])
+left_tensors = []
+left_names = []
+right_tensors = []
+right_names = []
 
 
 def detect_camera_side(file_name: str):
@@ -130,6 +139,12 @@ def main(args):
             if img_scaled is None:
                 continue
 
+            # save the normalized tensor (model input) for later use
+            try:
+                tensor_to_save = img_scaled.detach().cpu()
+            except Exception:
+                tensor_to_save = img_scaled.cpu()
+
             img_denorm = denormalize_for_visualization(img_scaled)
             if hasattr(img_denorm, 'cpu'):
                 img_denorm = img_denorm.detach().cpu().numpy()
@@ -147,8 +162,12 @@ def main(args):
             out_name = f"{stem}_{cat_name}.png"
             if cat_name == 'camera_left':
                 out_path = os.path.join(left_dir, out_name)
+                left_tensors.append(tensor_to_save)
+                left_names.append(out_name)
             else:
                 out_path = os.path.join(right_dir, out_name)
+                right_tensors.append(tensor_to_save)
+                right_names.append(out_name)
 
             cv2.imwrite(out_path, cv2.cvtColor(img_hwc, cv2.COLOR_RGB2BGR))
             saved_any = True
@@ -179,3 +198,30 @@ if __name__ == '__main__':
     parser.add_argument('--out-base', type=str, default='data/finetune/rgb')
     args = parser.parse_args()
     main(args)
+
+    # After processing, save collected tensors and write simple indices for reading
+    import json
+
+    out_base = args.out_base
+    mkdir_p(out_base)
+
+    left_out_file = os.path.join(out_base, 'camera_left_tensors.pt')
+    right_out_file = os.path.join(out_base, 'camera_right_tensors.pt')
+    left_index_file = os.path.join(out_base, 'camera_left_index.json')
+    right_index_file = os.path.join(out_base, 'camera_right_index.json')
+
+    try:
+        torch.save({'tensors': left_tensors, 'names': left_names}, left_out_file)
+        with open(left_index_file, 'w') as f:
+            json.dump({'names': left_names}, f)
+        print(f'Saved {len(left_names)} left tensors -> {left_out_file}')
+    except Exception as e:
+        print(f'Warning: failed to save left tensors: {e}')
+
+    try:
+        torch.save({'tensors': right_tensors, 'names': right_names}, right_out_file)
+        with open(right_index_file, 'w') as f:
+            json.dump({'names': right_names}, f)
+        print(f'Saved {len(right_names)} right tensors -> {right_out_file}')
+    except Exception as e:
+        print(f'Warning: failed to save right tensors: {e}')

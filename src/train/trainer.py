@@ -5,7 +5,8 @@ from typing import Optional
 import torch
 
 from src.config import cfg, args, get_device
-from src.datasets import make_dataloader
+from src.datasets import make_dataloader as make_standard_dataloader
+from src.finetune import make_dataloader as make_finetune_dataloader
 from src.models import make_network
 from .utils import get_loss
 
@@ -30,7 +31,6 @@ class IOPENTrainer:
         self.device = device or get_device()
         self.model = model or make_network()
         self.model = self.model.to(self.device)
-        self.dataloader = dataloader or make_dataloader()
 
         self.lr = lr
         self.weight_decay = weight_decay
@@ -45,17 +45,33 @@ class IOPENTrainer:
         self.lambda_weight = cfg['train'].get("loss_lambda", 1.0)
 
         train_cfg = cfg.get('train', {})
+        finetune_cfg = cfg.get('finetune', {})
+        self.use_finetune = bool(finetune_cfg.get('enabled', False))
         self.validate_enabled = bool(train_cfg.get('validate_enabled', True))
+        if self.use_finetune:
+            self.validate_enabled = bool(finetune_cfg.get('validate_enabled', self.validate_enabled))
         self.validate_interval = int(train_cfg.get('validate_interval', 1))
-        self.val_batch_size = int(train_cfg.get('val_batch_size', train_cfg.get('batch_size', 1)))
+        self.batch_size = int(
+            finetune_cfg.get('batch_size', train_cfg.get('batch_size', 1))
+            if self.use_finetune else train_cfg.get('batch_size', 1)
+        )
+        self.val_batch_size = int(
+            finetune_cfg.get('val_batch_size', train_cfg.get('val_batch_size', self.batch_size))
+            if self.use_finetune else train_cfg.get('val_batch_size', train_cfg.get('batch_size', 1))
+        )
         self.save_best_checkpoint_enabled = bool(train_cfg.get('save_best_checkpoint', True))
         self.best_checkpoint_path = train_cfg.get(
             'best_checkpoint_path', os.path.join(self.ckpt_dir, 'best.pth')
         )
         self.best_val_total = float('inf')
         self.val_dataloader = None
+        self.dataloader = dataloader or self._make_dataloader(
+            split='train',
+            shuffle=True,
+            batch_size=self.batch_size,
+        )
         if self.validate_enabled:
-            self.val_dataloader = make_dataloader(
+            self.val_dataloader = self._make_dataloader(
                 split='validate',
                 shuffle=False,
                 batch_size=self.val_batch_size,
@@ -72,6 +88,19 @@ class IOPENTrainer:
         best_ckpt_dir = os.path.dirname(self.best_checkpoint_path)
         if best_ckpt_dir:
             os.makedirs(best_ckpt_dir, exist_ok=True)
+
+    def _make_dataloader(self, split='train', shuffle=None, batch_size=None):
+        if self.use_finetune:
+            return make_finetune_dataloader(
+                split=split,
+                shuffle=shuffle,
+                batch_size=batch_size,
+            )
+        return make_standard_dataloader(
+            split=split,
+            shuffle=shuffle,
+            batch_size=batch_size,
+        )
 
     def _move_batch_to_device(self, batch):
         img = batch["img"].to(self.device)
