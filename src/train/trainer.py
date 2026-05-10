@@ -26,15 +26,6 @@ class IOPENTrainer:
         alpha: float = 50.0,
         use_adaptive_weight: bool = True,
         coarse_only_epochs: int = 0,
-        geom_reg_enabled: bool = False,
-        geom_reg_weight: float = 0.0,
-        geom_equal_length_weight: float = 1.0,
-        geom_orthogonality_weight: float = 1.0,
-        geom_parallel_weight: float = 1.0,
-        geom_eps: float = 1e-6,
-        early_stopping_enabled: bool = True,
-        early_stopping_patience: int = 10,
-        early_stopping_min_delta: float = 0.0,
     ):
         self.device = device or get_device()
         self.model = model or make_network()
@@ -51,20 +42,7 @@ class IOPENTrainer:
         self.alpha = alpha
         self.use_adaptive_weight = use_adaptive_weight
         self.coarse_only_epochs = max(0, int(coarse_only_epochs))
-        self.geom_reg_enabled = bool(geom_reg_enabled)
-        self.geom_reg_weight = float(geom_reg_weight)
-        self.geom_equal_length_weight = float(geom_equal_length_weight)
-        self.geom_orthogonality_weight = float(geom_orthogonality_weight)
-        self.geom_parallel_weight = float(geom_parallel_weight)
-        self.geom_eps = float(geom_eps)
         self.lambda_weight = cfg['train'].get("loss_lambda", 1.0)
-        self.early_stopping_enabled = bool(early_stopping_enabled)
-        self.early_stopping_patience = max(1, int(early_stopping_patience))
-        self.early_stopping_min_delta = float(early_stopping_min_delta)
-        self.early_stopping_metric = str(cfg.get('train', {}).get('early_stopping_metric', 'fine')).lower()
-        if self.early_stopping_metric not in ('total', 'coarse', 'fine', 'geom'):
-            self.early_stopping_metric = 'fine'
-        self.no_improve_count = 0
 
         train_cfg = cfg.get('train', {})
         self.validate_enabled = bool(train_cfg.get('validate_enabled', True))
@@ -110,7 +88,6 @@ class IOPENTrainer:
             "optimizer_state": self.optimizer.state_dict(),
             "cfg": cfg['train'],
             "best_val_total": self.best_val_total,
-            "no_improve_count": self.no_improve_count,
         }
         torch.save(payload, ckpt_path)
 
@@ -133,14 +110,12 @@ class IOPENTrainer:
         self.start_epoch = int(payload.get("epoch", 0)) + 1
         self.global_step = int(payload.get("global_step", 0))
         self.best_val_total = float(payload.get("best_val_total", self.best_val_total))
-        self.no_improve_count = int(payload.get("no_improve_count", self.no_improve_count))
 
     def train_one_epoch(self, epoch: int):
         self.model.train()
         epoch_total = 0.0
         epoch_coarse = 0.0
         epoch_fine = 0.0
-        epoch_geom = 0.0
         num_batches = 0
         start_time = time.time()
         use_coarse_only = epoch < self.coarse_only_epochs
@@ -150,22 +125,16 @@ class IOPENTrainer:
 
             self.optimizer.zero_grad(set_to_none=True)
             pred_heatmap = self.model(img)
-            loss, loss_coarse, loss_fine, loss_geom = get_loss(
+            loss, loss_coarse, loss_fine = get_loss(
                 pred=pred_heatmap,
                 gt={'heatmap': heatmap, 'coords': coords},
                 lambda_weight=self.lambda_weight,
                 temperature=self.temperature,
                 alpha=self.alpha,
                 use_adaptive_weight=self.use_adaptive_weight,
-                geom_reg_enabled=self.geom_reg_enabled,
-                geom_reg_weight=self.geom_reg_weight,
-                geom_equal_length_weight=self.geom_equal_length_weight,
-                geom_orthogonality_weight=self.geom_orthogonality_weight,
-                geom_parallel_weight=self.geom_parallel_weight,
-                geom_eps=self.geom_eps,
             )
             # Keep a stable, interpretable total metric for logging/selection.
-            report_total = loss_coarse + self.lambda_weight * loss_fine + loss_geom
+            report_total = loss_coarse + self.lambda_weight * loss_fine
             optimize_loss = loss_coarse if use_coarse_only else loss
             optimize_loss.backward()
             self.optimizer.step()
@@ -175,29 +144,26 @@ class IOPENTrainer:
             epoch_total += float(report_total.item())
             epoch_coarse += float(loss_coarse.item())
             epoch_fine += float(loss_fine.item())
-            epoch_geom += float(loss_geom.item())
 
             if self.log_interval > 0 and (batch_idx + 1) % self.log_interval == 0:
                 elapsed = time.time() - start_time
                 avg_total = epoch_total / num_batches
                 avg_coarse = epoch_coarse / num_batches
                 avg_fine = epoch_fine / num_batches
-                avg_geom = epoch_geom / num_batches
                 print(
                     f"Epoch {epoch} | Step {batch_idx + 1}/{len(self.dataloader)} | "
-                    f"Loss {avg_total:.6f} (coarse {avg_coarse:.6f}, fine {avg_fine:.6f}, geom {avg_geom:.6f}) | "
+                    f"Loss {avg_total:.6f} (coarse {avg_coarse:.6f}, fine {avg_fine:.6f}) | "
                     f"mode {'coarse-only' if use_coarse_only else 'coarse+fine'} | "
                     f"{elapsed:.1f}s"
                 )
 
         if num_batches == 0:
-            return {"total": 0.0, "coarse": 0.0, "fine": 0.0, "geom": 0.0}
+            return {"total": 0.0, "coarse": 0.0, "fine": 0.0}
 
         return {
             "total": epoch_total / num_batches,
             "coarse": epoch_coarse / num_batches,
             "fine": epoch_fine / num_batches,
-            "geom": epoch_geom / num_batches,
         }
 
     @torch.no_grad()
@@ -209,42 +175,33 @@ class IOPENTrainer:
         epoch_total = 0.0
         epoch_coarse = 0.0
         epoch_fine = 0.0
-        epoch_geom = 0.0
         num_batches = 0
 
         for batch in self.val_dataloader:
             img, heatmap, coords = self._move_batch_to_device(batch)
             pred_heatmap = self.model(img)
-            loss, loss_coarse, loss_fine, loss_geom = get_loss(
+            loss, loss_coarse, loss_fine = get_loss(
                 pred=pred_heatmap,
                 gt={'heatmap': heatmap, 'coords': coords},
                 lambda_weight=self.lambda_weight,
                 temperature=self.temperature,
                 alpha=self.alpha,
                 use_adaptive_weight=self.use_adaptive_weight,
-                geom_reg_enabled=self.geom_reg_enabled,
-                geom_reg_weight=self.geom_reg_weight,
-                geom_equal_length_weight=self.geom_equal_length_weight,
-                geom_orthogonality_weight=self.geom_orthogonality_weight,
-                geom_parallel_weight=self.geom_parallel_weight,
-                geom_eps=self.geom_eps,
             )
-            report_total = loss_coarse + self.lambda_weight * loss_fine + loss_geom
+            report_total = loss_coarse + self.lambda_weight * loss_fine
 
             num_batches += 1
             epoch_total += float(report_total.item())
             epoch_coarse += float(loss_coarse.item())
             epoch_fine += float(loss_fine.item())
-            epoch_geom += float(loss_geom.item())
 
         if num_batches == 0:
-            return {"total": 0.0, "coarse": 0.0, "fine": 0.0, "geom": 0.0}
+            return {"total": 0.0, "coarse": 0.0, "fine": 0.0}
 
         return {
             "total": epoch_total / num_batches,
             "coarse": epoch_coarse / num_batches,
             "fine": epoch_fine / num_batches,
-            "geom": epoch_geom / num_batches,
         }
 
     def train(self):
@@ -254,7 +211,7 @@ class IOPENTrainer:
             print(
                 f"Epoch {epoch} done | "
                 f"Loss {metrics['total']:.6f} (coarse {metrics['coarse']:.6f}, "
-                f"fine {metrics['fine']:.6f}, geom {metrics['geom']:.6f}) | mode {train_mode}"
+                f"fine {metrics['fine']:.6f}) | mode {train_mode}"
             )
 
             should_validate = (
@@ -268,18 +225,13 @@ class IOPENTrainer:
                 print(
                     f"Epoch {epoch} validate | "
                     f"Loss {val_metrics['total']:.6f} "
-                    f"(coarse {val_metrics['coarse']:.6f}, fine {val_metrics['fine']:.6f}, "
-                    f"geom {val_metrics['geom']:.6f})"
+                    f"(coarse {val_metrics['coarse']:.6f}, fine {val_metrics['fine']:.6f})"
                 )
 
-                monitor_value = val_metrics[self.early_stopping_metric]
-                improved = monitor_value < (self.best_val_total - self.early_stopping_min_delta)
+                improved = val_metrics["total"] < self.best_val_total
 
                 if improved:
-                    self.best_val_total = monitor_value
-                    self.no_improve_count = 0
-                else:
-                    self.no_improve_count += 1
+                    self.best_val_total = val_metrics["total"]
 
                 if self.save_best_checkpoint_enabled and improved:
                     self.save_best_checkpoint(epoch, val_metrics)
@@ -288,22 +240,6 @@ class IOPENTrainer:
                         f"val_total {self.best_val_total:.6f} | "
                         f"saved {self.best_checkpoint_path}"
                     )
-
-                if self.early_stopping_enabled:
-                    print(
-                        f"Epoch {epoch} early-stop monitor | "
-                        f"metric {self.early_stopping_metric} | "
-                        f"best {self.best_val_total:.6f} | "
-                        f"no_improve {self.no_improve_count}/{self.early_stopping_patience}"
-                    )
-                    if self.no_improve_count >= self.early_stopping_patience:
-                        print(
-                            f"Early stopping at epoch {epoch} | "
-                            f"best_val_total {self.best_val_total:.6f}"
-                        )
-                        if self.save_interval > 0:
-                            self.save_checkpoint(epoch)
-                        break
 
             if self.save_interval > 0 and (epoch + 1) % self.save_interval == 0:
                 self.save_checkpoint(epoch)
