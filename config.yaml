@@ -37,7 +37,7 @@ train:
   best_checkpoint_path: "/home/luyizhi/IOPEN/models/IOPEN/best.pth"
   gpu_id: 1
   epoch: 300
-  log_interval: 1
+  log_interval: 100
   save_interval: -1
   loss_lambda: 1.0
   loss_temperature: 0.1
