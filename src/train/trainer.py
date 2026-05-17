@@ -138,7 +138,8 @@ class IOPENTrainer:
         self.optimizer.load_state_dict(payload["optimizer_state"])
         self.start_epoch = int(payload.get("epoch", 0)) + 1
         self.global_step = int(payload.get("global_step", 0))
-        self.best_val_total = float(payload.get("best_val_total", self.best_val_total))
+        # self.best_val_total = float(payload.get("best_val_total", self.best_val_total))
+        self.best_val_total = float('inf')
 
     def train_one_epoch(self, epoch: int):
         self.model.train()

@@ -259,12 +259,24 @@ class IOPENDataset(Dataset):
 					)
 
 		if self._is_train_split or self._is_val_split:
-			split_index = int(round(len(self.samples) * self._train_ratio))
-			split_index = min(max(split_index, 0), len(self.samples))
-			if self._is_train_split:
-				self.samples = self.samples[:split_index]
+			total_count = len(self.samples)
+			train_count = int(round(total_count * self._train_ratio))
+			train_count = min(max(train_count, 0), total_count)
+
+			all_indices = np.arange(total_count)
+			if train_count == 0:
+				train_indices = np.array([], dtype=int)
+			elif train_count == total_count:
+				train_indices = all_indices
 			else:
-				self.samples = self.samples[split_index:]
+				train_indices = np.floor(np.arange(train_count) * total_count / train_count).astype(int)
+
+			if self._is_train_split:
+				selected_indices = train_indices
+			else:
+				selected_indices = np.setdiff1d(all_indices, train_indices, assume_unique=False)
+
+			self.samples = [self.samples[index] for index in selected_indices]
 
 	def __len__(self):
 		return len(self.samples)
