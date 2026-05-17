@@ -1,0 +1,69 @@
+model_scale: "small"
+
+height: 224
+width: 224
+
+encoder_path: ""
+patch: 14
+
+dataset:
+  target_obj_id: 1
+  num_scene: 10
+  num_train: 40
+  num_val: 10
+  sample_rate: 1
+  normalize:
+    enabled: True
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+  gt_bbox_3d:
+    enabled: True
+    scale_xyz: [0.9, 0.7, 1.3]
+    center_offset_xyz: [-12.0, 0.0, 5.0]
+  crop_aug:
+    enabled: True
+    scale_min: 0.9
+    scale_max: 1.2
+    shift_ratio: 0.1
+
+train:
+  dataset_path: ""
+  result_path: ""
+  batch_size: 32
+  val_batch_size: 64
+  validate_enabled: True
+  validate_interval: 1
+  save_best_checkpoint: True
+  best_checkpoint_path: ""
+  gpu_id: 0
+  epoch: 100
+  log_interval: 100
+  save_interval: -1
+  loss_lambda: 1.0
+  loss_temperature: 0.1
+  loss_alpha: 10.0
+  use_adaptive_weight: True
+  coarse_only_epochs: 5
+  use_checkpoint: False
+  checkpoint_path: ""
+
+eval:
+  model_path: ""
+  output_dir: ""
+  coco_path: ""
+  coco_frame_dir: ""
+  keyframe_propagation:
+    enabled: False
+    interval: 2
+    match_iou_thr: 0.1
+    match_center_thr: 2.0
+
+finetune:
+  enabled: False
+  batch_size: 32
+  val_batch_size: 64
+  dataset:
+    tensor_path: []
+    coco_path: []
+    train_ratio: 0.9
+  validate_enabled: True
