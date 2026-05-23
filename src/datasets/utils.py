@@ -3,6 +3,7 @@ import json
 import torch
 import torch.nn.functional as F
 import random
+import math
 from src.config import cfg, args
 
 
@@ -111,6 +112,89 @@ def _direct_resize_tensor(tensor, target_h, target_w, mode='bilinear'):
         mode=mode,
         align_corners=False,
     ).squeeze(0)
+
+
+def _build_motion_blur_kernel(kernel_size, angle_degrees, device, dtype):
+    kernel_size = int(kernel_size)
+    if kernel_size < 3:
+        return None
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    kernel = torch.zeros((kernel_size, kernel_size), dtype=dtype, device=device)
+    center = 0.5 * (kernel_size - 1)
+    theta = math.radians(float(angle_degrees))
+    cos_theta = math.cos(theta)
+    sin_theta = math.sin(theta)
+
+    samples = max(2 * kernel_size, 8)
+    positions = torch.linspace(-center, center, steps=samples, device=device, dtype=dtype)
+
+    for offset in positions:
+        x = center + offset * cos_theta
+        y = center + offset * sin_theta
+
+        x0 = int(math.floor(float(x)))
+        y0 = int(math.floor(float(y)))
+        x1 = x0 + 1
+        y1 = y0 + 1
+
+        wx1 = float(x - x0)
+        wy1 = float(y - y0)
+        wx0 = 1.0 - wx1
+        wy0 = 1.0 - wy1
+
+        weights = (
+            (x0, y0, wx0 * wy0),
+            (x1, y0, wx1 * wy0),
+            (x0, y1, wx0 * wy1),
+            (x1, y1, wx1 * wy1),
+        )
+
+        for px, py, weight in weights:
+            if 0 <= px < kernel_size and 0 <= py < kernel_size and weight > 0.0:
+                kernel[py, px] += weight
+
+    kernel_sum = kernel.sum().clamp_min(torch.finfo(dtype).eps)
+    kernel = kernel / kernel_sum
+    return kernel.view(1, 1, kernel_size, kernel_size)
+
+
+def apply_motion_blur(img, motion_blur_cfg):
+    if not motion_blur_cfg.get('enabled', False):
+        return img
+
+    probability = float(motion_blur_cfg.get('probability', 0.0))
+    if probability <= 0.0 or random.random() > probability:
+        return img
+
+    kernel_min = int(motion_blur_cfg.get('kernel_size_min', 3))
+    kernel_max = int(motion_blur_cfg.get('kernel_size_max', kernel_min))
+    kernel_min = max(3, kernel_min)
+    kernel_max = max(kernel_min, kernel_max)
+
+    kernel_size = random.randint(kernel_min, kernel_max)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    angle_min = float(motion_blur_cfg.get('angle_min', 0.0))
+    angle_max = float(motion_blur_cfg.get('angle_max', 180.0))
+    if angle_max < angle_min:
+        angle_min, angle_max = angle_max, angle_min
+    angle = random.uniform(angle_min, angle_max)
+
+    kernel = _build_motion_blur_kernel(kernel_size, angle, img.device, img.dtype)
+    if kernel is None:
+        return img
+
+    channels = img.shape[0]
+    weight = kernel.repeat(channels, 1, 1, 1)
+    pad = kernel_size // 2
+    img_batched = img.unsqueeze(0)
+    if pad > 0:
+        img_batched = F.pad(img_batched, (pad, pad, pad, pad), mode='reflect')
+    blurred = F.conv2d(img_batched, weight, groups=channels)
+    return blurred.squeeze(0)
 
 def gen_gt(camera, model, cam_R_m2c, cam_t_m2c):
     """

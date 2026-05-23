@@ -8,6 +8,8 @@ from src.config import cfg
 class IOPENDataset(Dataset):
     def __init__(self, data_root, split='train'):
         dataset_cfg = cfg.get('dataset', {})
+        self.split = split
+        self.motion_blur_cfg = dataset_cfg.get('motion_blur', {})
         
         # Support both old (scene_split) and new (num_train/num_val) formats
         scene_split_cfg = dataset_cfg.get('scene_split', {})
@@ -51,6 +53,7 @@ class IOPENDataset(Dataset):
         ) # (8, H, W) & (8, 2) np array
 
         img_original = torch.from_numpy(img_original).permute(2, 0, 1).float()
+        img_original = apply_motion_blur(img_original, self.motion_blur_cfg)
         heatmap_original = torch.from_numpy(heatmap_original).float()
         coords_original = torch.from_numpy(coords_original).float()
 
